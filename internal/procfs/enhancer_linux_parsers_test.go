@@ -5,6 +5,7 @@ package procfs
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -116,3 +117,36 @@ func TestGetBootTimeFallback(t *testing.T) {
 		t.Errorf("getBootTime() fallback = %d, want within 5s of now", got)
 	}
 }
+
+// TestParseStatStartTimeAndUptime pins down info.StartTime against a fixed
+// btime (from the SampleProcBootStat fixture) and a fixed starttime tick
+// count (from the SampleProcStat fixture), so a future off-by-one on
+// idxStarttime is caught even though this file only runs in CI/Linux. The
+// expected value is computed independently here (not by re-deriving the
+// production formula) so a real regression in parseStat can't cancel out.
+// Uptime is derived from time.Since and is therefore not pinned to an exact
+// string; it's only checked for the expected "Nd Nh Nm Ns" shape.
+func TestParseStatStartTimeAndUptime(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stat"), []byte(testutil.SampleProcBootStat()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info := &model.ProcessInfo{}
+	parseStat(testutil.SampleProcStat(), info, dir)
+
+	// btime = 1609459200 (SampleProcBootStat), starttime = 1234567890 ticks
+	// (SampleProcStat, field 22 per man 5 proc) -> 12345678s after boot.
+	const btime = 1609459200
+	const starttimeTicks = 1234567890
+	wantStartTime := time.Unix(btime+starttimeTicks/100, 0).Format("2006-01-02 15:04:05")
+	if info.StartTime != wantStartTime {
+		t.Errorf("StartTime = %q, want %q", info.StartTime, wantStartTime)
+	}
+
+	if !uptimeShape.MatchString(info.Uptime) {
+		t.Errorf("Uptime = %q, want to match %s", info.Uptime, uptimeShape)
+	}
+}
+
+var uptimeShape = regexp.MustCompile(`^\d+d \d+h \d+m \d+s$`)
