@@ -155,3 +155,82 @@ func TestParseAddressIPv6(t *testing.T) {
 		})
 	}
 }
+
+// TestHexToIP verifies IPv4 addresses from /proc/net/tcp (8 hex chars, one
+// little-endian 32-bit word) are decoded correctly.
+func TestHexToIP(t *testing.T) {
+	tests := []struct {
+		name string
+		hex  string
+		want string
+	}{
+		{"localhost", "0100007F", "127.0.0.1"},
+		{"all zeros", "00000000", "0.0.0.0"},
+		{"example IP", "0101A8C0", "192.168.1.1"},
+		{"another IP", "0A00020A", "10.2.0.10"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := HexToIP(tt.hex)
+			if got != tt.want {
+				t.Errorf("HexToIP(%q) = %v, want %v", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseAddress verifies IPv4 addresses format correctly through
+// ParseAddress, including the "*" wildcard for the 0.0.0.0 all-interfaces case.
+func TestParseAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		hex  string
+		want string
+	}{
+		{"localhost:8080", "0100007F:1F90", "127.0.0.1:8080"},
+		{"all interfaces:3000", "00000000:0BB8", "*:3000"},
+		{"localhost:3306", "0100007F:0CEA", "127.0.0.1:3306"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseAddress(tt.hex)
+			if got != tt.want {
+				t.Errorf("ParseAddress(%q) = %v, want %v", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExpandState verifies process state codes from /proc/[pid]/stat are
+// expanded into the human-readable strings the display layer actually
+// shows, and that an unrecognized/empty code is passed through rather than
+// dropped.
+func TestExpandState(t *testing.T) {
+	tests := []struct {
+		state string
+		want  string
+	}{
+		{"R", "Running"},
+		{"S", "Sleeping (interruptible)"},
+		{"D", "Waiting (uninterruptible)"},
+		{"Z", "Zombie"},
+		{"T", "Stopped"},
+		{"t", "Tracing stop"},
+		{"X", "Dead"},
+		{"x", "x"}, // Unknown state returns as-is
+		{"I", "Idle"},
+		{"?", "?"}, // Unknown state returns as-is
+		{"", ""},   // Empty returns empty
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			got := ExpandState(tt.state)
+			if got != tt.want {
+				t.Errorf("ExpandState(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}

@@ -49,3 +49,31 @@ func TestParseNetworkConnectionsNoConnections(t *testing.T) {
 		t.Errorf("got tcp=%v udp=%v, want both empty", tcp, udp)
 	}
 }
+
+// TestExpandState verifies process state codes are expanded into the
+// human-readable strings the display layer actually shows, and that an
+// unrecognized/empty code is passed through rather than dropped.
+func TestExpandState(t *testing.T) {
+	tests := []struct {
+		state string
+		want  string
+	}{
+		{"R", "Running"},
+		{"S", "Sleeping"},
+		{"U", "Uninterruptible wait"},
+		{"Z", "Zombie"},
+		{"T", "Stopped"},
+		{"I", "Idle"},
+		{"x", "x"}, // Unknown state returns as-is
+		{"", ""},   // Empty returns empty
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			got := ExpandState(tt.state)
+			if got != tt.want {
+				t.Errorf("ExpandState(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
