@@ -51,6 +51,32 @@ func TestExtractContainerIPFromProxy(t *testing.T) {
 	}
 }
 
+func TestIsDockerPortHandler(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		expected bool
+	}{
+		{name: "docker-proxy", command: "docker-proxy", expected: true},
+		{name: "docker-proxy with path", command: "/usr/bin/docker-proxy", expected: true},
+		{name: "com.docker.backend", command: "com.docker.backend", expected: true},
+		{name: "bare docker", command: "docker", expected: true},
+		{name: "case insensitive", command: "Docker-Proxy", expected: true},
+		{name: "unrelated binary launched from a path containing docker", command: "node", expected: false},
+		{name: "unrelated binary name merely containing docker", command: "dockerized-app", expected: false},
+		{name: "empty command", command: "", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isDockerPortHandler(tt.command)
+			if result != tt.expected {
+				t.Errorf("isDockerPortHandler(%q) = %v, want %v", tt.command, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestCheckCgroupForContainer(t *testing.T) {
 	detector := &DefaultDetector{dockerAvailable: true}
 

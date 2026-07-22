@@ -6,12 +6,29 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
+
+// dockerPortHandlerNames are the known executable names of processes that own a host
+// port on behalf of a Docker container (as opposed to any process whose command line
+// merely mentions "docker", e.g. one launched from a path containing that word).
+var dockerPortHandlerNames = map[string]bool{
+	"docker-proxy":       true, // Linux: forwards a published port to the container
+	"com.docker.backend": true, // macOS: Docker Desktop's port-handling process
+	"docker":             true,
+}
+
+// isDockerPortHandler reports whether command is one of the known Docker binaries that
+// bind host ports for containers.
+func isDockerPortHandler(command string) bool {
+	name := strings.ToLower(filepath.Base(command))
+	return dockerPortHandlerNames[name]
+}
 
 // Detector identifies if a process is related to a Docker container.
 type Detector interface {
@@ -46,10 +63,10 @@ func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bo
 		return false, "", nil
 	}
 
-	// Strategy 1: If process name contains "docker", query Docker for containers using this port
-	// This works on both Linux and macOS (including Docker Desktop where com.docker.backend handles ports)
-	if strings.Contains(strings.ToLower(info.Command), "docker") ||
-		strings.Contains(strings.ToLower(info.FullCommand), "docker") {
+	// Strategy 1: If the process is a known Docker port-handling binary, query Docker for
+	// containers using this port. This works on both Linux and macOS (including Docker
+	// Desktop where com.docker.backend handles ports).
+	if isDockerPortHandler(info.Command) {
 		containerID := d.findContainerByPort(port)
 		if containerID != "" {
 			return true, containerID, nil
