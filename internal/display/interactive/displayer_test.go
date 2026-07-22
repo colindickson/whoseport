@@ -60,3 +60,21 @@ func TestPrintModernSectionAlignment(t *testing.T) {
 		t.Fatalf("expected section to contain title text, got: %s", stripped)
 	}
 }
+
+// TestPrintGradientBannerNarrowWidthDoesNotPanic guards the same class of
+// bug fixed in the Docker banner: padding math must never go negative when
+// the terminal width is smaller than the banner text.
+func TestPrintGradientBannerNarrowWidthDoesNotPanic(t *testing.T) {
+	d := NewDisplayer()
+	d.width = 20
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("printGradientBanner panicked at narrow width: %v", r)
+		}
+	}()
+
+	captureOutput(func() {
+		d.printGradientBanner("PORT 12345 ANALYSIS")
+	})
+}
