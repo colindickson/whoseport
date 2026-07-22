@@ -7,6 +7,82 @@ import (
 	"github.com/bluehoodie/whoseport/internal/terminal"
 )
 
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		name  string
+		bytes int64
+		want  string
+	}{
+		{"zero bytes", 0, "0 B"},
+		{"bytes", 500, "500 B"},
+		{"kilobytes", 1024, "1.00 KB"},
+		{"megabytes", 1024 * 1024, "1.00 MB"},
+		{"gigabytes", 1024 * 1024 * 1024, "1.00 GB"},
+		{"mixed KB", 1536, "1.50 KB"},
+		{"mixed MB", 1024*1024 + 512*1024, "1.50 MB"},
+		{"large number", 9876543210, "9.20 GB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatBytes(tt.bytes)
+			if got != tt.want {
+				t.Errorf("FormatBytes(%d) = %v, want %v", tt.bytes, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatMemory(t *testing.T) {
+	tests := []struct {
+		name string
+		kb   int64
+		want string
+	}{
+		{"zero", 0, "0 KB"},
+		{"kilobytes", 100, "100 KB"},
+		{"megabytes", 1024, "1.00 MB"},
+		{"gigabytes", 1024 * 1024, "1.00 GB"},
+		{"mixed MB", 1536, "1.50 MB"},
+		{"large GB", 2560 * 1024, "2.50 GB"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatMemory(tt.kb)
+			if got != tt.want {
+				t.Errorf("FormatMemory(%d) = %v, want %v", tt.kb, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetStateEmoji(t *testing.T) {
+	tests := []struct {
+		state string
+		want  string
+	}{
+		{"Running", "🟢"},
+		{"Sleeping", "🔵"},
+		{"Sleeping (interruptible)", "🔵"},
+		{"Waiting (uninterruptible)", "⏸"},
+		{"Zombie", "💀"},
+		{"Stopped", "🟡"},
+		{"Dead", "⚪"},
+		{"Unknown", "⚪"},
+		{"", "⚪"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			got := GetStateEmoji(tt.state)
+			if got != tt.want {
+				t.Errorf("GetStateEmoji(%q) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatDuration(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -18,7 +94,9 @@ func TestFormatDuration(t *testing.T) {
 		{"minutes", 5 * time.Minute, "5m 0s"},
 		{"hours", 2 * time.Hour, "2h 0m 0s"},
 		{"days", 24 * time.Hour, "1d 0h 0m 0s"},
+		{"weeks", 7 * 24 * time.Hour, "7d 0h 0m 0s"},
 		{"mixed", 2*time.Hour + 30*time.Minute + 15*time.Second, "2h 30m 15s"},
+		{"long uptime", 10*24*time.Hour + 5*time.Hour + 23*time.Minute, "10d 5h 23m 0s"},
 	}
 
 	for _, tt := range tests {
@@ -42,6 +120,11 @@ func TestVisualWidth(t *testing.T) {
 		{"emoji variation selector", "⚙️  PROCESS IDENTITY", 20},
 		{"multiple emoji", "🔍⚙️📊", 6},
 		{"zwj sequence", "👩‍💻", 2},
+		{"emoji with text", "🔍 Search", 9},
+		{"mixed", "Hello 🌍 World", 14},
+		{"empty string", "", 0},
+		{"spaces", "   ", 3},
+		{"emoji at end", "Test 🎉", 7},
 	}
 
 	for _, tt := range tests {

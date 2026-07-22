@@ -8,13 +8,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/bluehoodie/whoseport/internal/display/format"
 	displayjson "github.com/bluehoodie/whoseport/internal/display/json"
 	"github.com/bluehoodie/whoseport/internal/model"
 	"github.com/bluehoodie/whoseport/internal/process"
-	"github.com/bluehoodie/whoseport/internal/procfs"
 )
 
 // NOTE: lsof output parsing used to be tested here (TestToProcessInfo), but
@@ -25,218 +23,18 @@ import (
 // internal/process/parser_test.go (TestLsofParser_Parse) instead, which is
 // strictly stronger: it also covers multi-row/multi-PID lsof output and the
 // ErrNoService sentinel.
-
-// TestFormatBytes tests byte formatting
-func TestFormatBytes(t *testing.T) {
-	tests := []struct {
-		name  string
-		bytes int64
-		want  string
-	}{
-		{"zero bytes", 0, "0 B"},
-		{"bytes", 500, "500 B"},
-		{"kilobytes", 1024, "1.00 KB"},
-		{"megabytes", 1024 * 1024, "1.00 MB"},
-		{"gigabytes", 1024 * 1024 * 1024, "1.00 GB"},
-		{"mixed KB", 1536, "1.50 KB"},
-		{"mixed MB", 1024*1024 + 512*1024, "1.50 MB"},
-		{"large number", 9876543210, "9.20 GB"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.FormatBytes(tt.bytes)
-			if got != tt.want {
-				t.Errorf("format.FormatBytes(%d) = %v, want %v", tt.bytes, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestFormatMemory tests memory formatting
-func TestFormatMemory(t *testing.T) {
-	tests := []struct {
-		name string
-		kb   int64
-		want string
-	}{
-		{"zero", 0, "0 KB"},
-		{"kilobytes", 100, "100 KB"},
-		{"megabytes", 1024, "1.00 MB"},
-		{"gigabytes", 1024 * 1024, "1.00 GB"},
-		{"mixed MB", 1536, "1.50 MB"},
-		{"large GB", 2560 * 1024, "2.50 GB"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.FormatMemory(tt.kb)
-			if got != tt.want {
-				t.Errorf("format.FormatMemory(%d) = %v, want %v", tt.kb, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestFormatDuration tests duration formatting
-func TestFormatDuration(t *testing.T) {
-	tests := []struct {
-		name     string
-		duration time.Duration
-		want     string
-	}{
-		{"zero", 0, "0s"},
-		{"seconds", 30 * time.Second, "30s"},
-		{"minutes", 5 * time.Minute, "5m 0s"},
-		{"hours", 2 * time.Hour, "2h 0m 0s"},
-		{"days", 24 * time.Hour, "1d 0h 0m 0s"},
-		{"weeks", 7 * 24 * time.Hour, "7d 0h 0m 0s"},
-		{"mixed", 2*time.Hour + 30*time.Minute + 15*time.Second, "2h 30m 15s"},
-		{"long uptime", 10*24*time.Hour + 5*time.Hour + 23*time.Minute, "10d 5h 23m 0s"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := procfs.FormatDuration(tt.duration)
-			if got != tt.want {
-				t.Errorf("procfs.FormatDuration(%v) = %v, want %v", tt.duration, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestVisualWidth tests visual width calculation for emoji and unicode
-func TestVisualWidth(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  int
-	}{
-		{"ascii only", "hello", 5},
-		{"single emoji", "🔍", 2},
-		{"emoji with text", "🔍 Search", 9},
-		{"multiple emoji", "🔍⚙️📊", 6},
-		{"mixed", "Hello 🌍 World", 14},
-		{"empty string", "", 0},
-		{"spaces", "   ", 3},
-		{"emoji at end", "Test 🎉", 7},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.VisualWidth(tt.input)
-			if got != tt.want {
-				t.Errorf("format.VisualWidth(%q) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestStripAnsiCodes tests ANSI code removal
-func TestStripAnsiCodes(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"no codes", "hello", "hello"},
-		{"simple color", "\033[31mred\033[0m", "red"},
-		{"multiple codes", "\033[1m\033[31mbold red\033[0m", "bold red"},
-		{"256 color", "\033[38;5;208morange\033[0m", "orange"},
-		{"mixed", "Hello \033[31mRed\033[0m World", "Hello Red World"},
-		{"empty", "", ""},
-		{"only codes", "\033[31m\033[0m", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.StripAnsiCodes(tt.input)
-			if got != tt.want {
-				t.Errorf("format.StripAnsiCodes(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestGetStateEmoji tests emoji mapping for process states
-func TestGetStateEmoji(t *testing.T) {
-	tests := []struct {
-		state string
-		want  string
-	}{
-		{"Running", "🟢"},
-		{"Sleeping", "🔵"},
-		{"Sleeping (interruptible)", "🔵"},
-		{"Waiting (uninterruptible)", "⏸"},
-		{"Zombie", "💀"},
-		{"Stopped", "🟡"},
-		{"Dead", "⚪"},
-		{"Unknown", "⚪"},
-		{"", "⚪"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.state, func(t *testing.T) {
-			got := format.GetStateEmoji(tt.state)
-			if got != tt.want {
-				t.Errorf("format.GetStateEmoji(%q) = %v, want %v", tt.state, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestGetStateColor tests color mapping for process states
-func TestGetStateColor(t *testing.T) {
-	tests := []struct {
-		state string
-		want  string
-	}{
-		{"Running", "\033[32m"},    // Green
-		{"Sleeping", "\033[36m"},   // Cyan
-		{"Disk Sleep", "\033[37m"}, // White
-		{"Zombie", "\033[31m"},     // Red
-		{"Stopped", "\033[33m"},    // Yellow
-		{"Dead", "\033[37m"},       // White
-		{"Unknown", "\033[37m"},    // White
-		{"", "\033[37m"},           // White
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.state, func(t *testing.T) {
-			got := format.GetStateColor(tt.state, nil)
-			if got != tt.want {
-				t.Errorf("format.GetStateColor(%q) = %v, want %v", tt.state, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestTruncate tests string truncation
-func TestTruncate(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		maxLen int
-		want   string
-	}{
-		{"no truncation needed", "hello", 10, "hello"},
-		{"exact length", "hello", 5, "hello"},
-		{"format.Truncate short", "hello world", 5, "he..."},
-		{"format.Truncate medium", "hello world", 8, "hello..."},
-		{"empty string", "", 5, ""},
-		{"very short limit", "hello", 3, "..."},
-		// Note: format.Truncate panics when maxLen < 3, which is a bug we'll fix during refactoring
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.Truncate(tt.input, tt.maxLen)
-			if got != tt.want {
-				t.Errorf("format.Truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-			}
-		})
-	}
-}
+//
+// NOTE: FormatBytes, FormatMemory, FormatDuration, VisualWidth,
+// StripAnsiCodes, GetStateEmoji, GetStateColor and Truncate are pure
+// internal/display/format functions (FormatDuration was formerly duplicated
+// in internal/procfs too) that used to have copies of their tests here.
+// Those copies exercised nothing in this package and are now covered - at
+// least as thoroughly, including the previously-untested maxLen<3 Truncate
+// cases and the terminal.Theme-aware GetStateColor path - by
+// internal/display/format/formatters_test.go. The few cases that file was
+// missing (FormatDuration's "weeks"/"long uptime", several VisualWidth
+// cases, and GetStateEmoji/FormatBytes/FormatMemory entirely) were ported
+// there before deleting the copies here.
 
 // TestPrintJSON tests JSON output generation
 func TestPrintJSON(t *testing.T) {
