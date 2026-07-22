@@ -1,8 +1,6 @@
 // Package docker provides Docker container detection and information retrieval.
 package docker
 
-import "time"
-
 // ContainerInfo represents comprehensive information about a Docker container.
 type ContainerInfo struct {
 	// Container identification
@@ -60,18 +58,4 @@ type Mount struct {
 	Source      string `json:"source"`      // Source path/volume
 	Destination string `json:"destination"` // Destination in container
 	Mode        string `json:"mode"`        // Mount mode (rw, ro)
-}
-
-// Stats represents real-time container statistics.
-type Stats struct {
-	CPUPerc     float64   `json:"cpu_percent"`
-	MemUsage    int64     `json:"mem_usage"` // bytes
-	MemLimit    int64     `json:"mem_limit"` // bytes
-	MemPerc     float64   `json:"mem_percent"`
-	NetInput    int64     `json:"net_input"`    // bytes
-	NetOutput   int64     `json:"net_output"`   // bytes
-	BlockInput  int64     `json:"block_input"`  // bytes
-	BlockOutput int64     `json:"block_output"` // bytes
-	NumPIDs     int       `json:"num_pids"`
-	Timestamp   time.Time `json:"timestamp"`
 }
