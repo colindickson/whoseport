@@ -148,7 +148,7 @@ func handleDockerContainer(containerID string, processInfo *model.ProcessInfo, p
 		// irreversible and is never a silent default, only an explicit choice
 		// in the interactive menu (see PromptAction/ActionStopAndRemove below).
 		if err := actionHandler.ExecuteAction(dockerpkg.ActionStop, containerInfo); err != nil {
-			fmt.Printf("%s✗ Failed to execute action:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
+			fmt.Fprintf(os.Stderr, "%s✗ Failed to execute action:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 			os.Exit(1)
 		}
 	} else if !noInteractive {
@@ -156,7 +156,7 @@ func handleDockerContainer(containerID string, processInfo *model.ProcessInfo, p
 		action := actionHandler.PromptAction(containerInfo)
 		if action != dockerpkg.ActionCancel {
 			if err := actionHandler.ExecuteAction(action, containerInfo); err != nil {
-				fmt.Printf("%s✗ Failed to execute action:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
+				fmt.Fprintf(os.Stderr, "%s✗ Failed to execute action:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 				os.Exit(1)
 			}
 		}
@@ -181,17 +181,17 @@ func handleRegularProcess(processInfo *model.ProcessInfo, port int) {
 	if killFlag {
 		// Force kill without prompting (SIGKILL)
 		if err := killer.Kill(processInfo.ID, syscall.SIGKILL); err != nil {
-			fmt.Printf("%s✗ Failed to kill process:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
+			fmt.Fprintf(os.Stderr, "%s✗ Failed to kill process:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 			os.Exit(1)
 		}
-		fmt.Printf("%s✓ Successfully killed process %d with SIGKILL%s\n", terminal.ColorGreen, processInfo.ID, terminal.ColorReset)
+		fmt.Fprintf(os.Stderr, "%s✓ Successfully killed process %d with SIGKILL%s\n", terminal.ColorGreen, processInfo.ID, terminal.ColorReset)
 	} else if termFlag {
 		// Gracefully terminate without prompting (SIGTERM)
 		if err := killer.Kill(processInfo.ID, syscall.SIGTERM); err != nil {
-			fmt.Printf("%s✗ Failed to terminate process:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
+			fmt.Fprintf(os.Stderr, "%s✗ Failed to terminate process:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 			os.Exit(1)
 		}
-		fmt.Printf("%s✓ Successfully terminated process %d with SIGTERM%s\n", terminal.ColorGreen, processInfo.ID, terminal.ColorReset)
+		fmt.Fprintf(os.Stderr, "%s✓ Successfully terminated process %d with SIGTERM%s\n", terminal.ColorGreen, processInfo.ID, terminal.ColorReset)
 	} else if !noInteractive {
 		// Interactive mode - prompt for action in a single step
 		prompter := action.NewPrompter()
@@ -199,10 +199,10 @@ func handleRegularProcess(processInfo *model.ProcessInfo, port int) {
 		if shouldKill {
 			// Send the selected signal
 			if err := killer.Kill(processInfo.ID, signal); err != nil {
-				fmt.Printf("%s✗ Failed to kill process:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
+				fmt.Fprintf(os.Stderr, "%s✗ Failed to kill process:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 				os.Exit(1)
 			}
-			fmt.Printf("%s✓ Successfully sent signal %v to process %d%s\n", terminal.ColorGreen, signal, processInfo.ID, terminal.ColorReset)
+			fmt.Fprintf(os.Stderr, "%s✓ Successfully sent signal %v to process %d%s\n", terminal.ColorGreen, signal, processInfo.ID, terminal.ColorReset)
 		}
 	}
 }

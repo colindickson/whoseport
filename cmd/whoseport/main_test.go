@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -22,11 +23,24 @@ import (
 // subprocess by the TestCLI_* tests below.
 var binPath string
 
+// listenHelperEnvVar, when set to "1", makes TestMain re-exec this same test
+// binary as a standalone TCP listener instead of running the test suite. See
+// TestCLI_JSONActionOutputStaysParseable, which needs a real child process it
+// owns (and can safely signal) to be the "process using the port" - it can't
+// use the go test process itself, since that's the process a real SIGTERM
+// would kill.
+const listenHelperEnvVar = "WHOSEPORT_TEST_LISTEN_HELPER"
+
 // TestMain builds the real whoseport binary once so the CLI tests can run it
 // as a subprocess and assert on its actual exit code/stdout/stderr, rather
 // than reimplementing flag-parsing logic that has nothing to do with
 // whoseport's own validation.
 func TestMain(m *testing.M) {
+	if os.Getenv(listenHelperEnvVar) == "1" {
+		runListenHelper()
+		return
+	}
+
 	dir, err := os.MkdirTemp("", "whoseport-test")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "TestMain: MkdirTemp:", err)
@@ -42,6 +56,28 @@ func TestMain(m *testing.M) {
 	}
 
 	os.Exit(m.Run())
+}
+
+// runListenHelper opens a TCP listener on an OS-assigned port, prints that
+// port to stdout so the parent test can find it, and then blocks until
+// killed. It only runs when listenHelperEnvVar is set - see TestMain.
+func runListenHelper() {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "runListenHelper: listen:", err)
+		os.Exit(1)
+	}
+	fmt.Println(l.Addr().(*net.TCPAddr).Port)
+	// Accept forever (rather than select{}, which the runtime's deadlock
+	// detector would kill this single-goroutine process for) until the
+	// parent kills us, e.g. via whoseport -t.
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		conn.Close()
+	}
 }
 
 // runCLI runs the built whoseport binary with the given args and returns its
@@ -143,6 +179,73 @@ func TestCLI_JSONNoServiceIsCleanOnStdout(t *testing.T) {
 	}
 	if !strings.Contains(stderr, fmt.Sprintf("port %d", port)) {
 		t.Errorf("stderr = %q, want it to mention port %d", stderr, port)
+	}
+}
+
+// TestCLI_JSONActionOutputStaysParseable verifies that --json combined with
+// an action flag (-t) against a port that IS in use produces stdout that is
+// still valid JSON, with the "successfully terminated" confirmation instead
+// landing on stderr. TestCLI_JSONNoServiceIsCleanOnStdout only covers the
+// "nothing listening" path, which never reaches the action-result fmt.Printf
+// calls in handleRegularProcess - exactly why the bug those calls caused
+// survived review.
+//
+// This spawns its own child process (via the re-exec pattern in TestMain /
+// runListenHelper) to be the thing listening on the port, so that -t signals
+// only a process this test owns and started - never the test binary itself.
+func TestCLI_JSONActionOutputStaysParseable(t *testing.T) {
+	helper := exec.Command(os.Args[0])
+	helper.Env = append(os.Environ(), listenHelperEnvVar+"=1")
+	stdoutPipe, err := helper.StdoutPipe()
+	if err != nil {
+		t.Fatalf("failed to attach stdout pipe to listen helper: %v", err)
+	}
+	var helperStderr bytes.Buffer
+	helper.Stderr = &helperStderr
+
+	if err := helper.Start(); err != nil {
+		t.Fatalf("failed to start listen helper: %v", err)
+	}
+	var waited bool
+	defer func() {
+		// Best-effort cleanup: whoseport -t below should already have
+		// terminated the helper (and the explicit Wait near the end of this
+		// test will have reaped it), but if the test fails/returns before
+		// that point this ensures we don't leak the child process we started.
+		if !waited {
+			_ = helper.Process.Kill()
+			_ = helper.Wait()
+		}
+	}()
+
+	line, err := bufio.NewReader(stdoutPipe).ReadString('\n')
+	if err != nil {
+		t.Fatalf("failed to read port from listen helper: %v (stderr: %s)", err, helperStderr.String())
+	}
+	port := strings.TrimSpace(line)
+
+	stdout, stderr, exitCode := runCLI(t, "--json", "-t", port)
+
+	if exitCode != 0 {
+		t.Errorf("exit code = %d, want 0 (stdout=%q stderr=%q)", exitCode, stdout, stderr)
+	}
+
+	var info model.ProcessInfo
+	if err := json.Unmarshal([]byte(stdout), &info); err != nil {
+		t.Errorf("stdout did not parse as JSON: %v\nstdout: %q", err, stdout)
+	}
+
+	if strings.Contains(stdout, "Successfully terminated") {
+		t.Errorf("stdout contains the action confirmation message, want it on stderr only: %q", stdout)
+	}
+	if !strings.Contains(stderr, "Successfully terminated") {
+		t.Errorf("stderr = %q, want it to contain the termination confirmation", stderr)
+	}
+
+	waitErr := helper.Wait()
+	waited = true
+	if waitErr == nil {
+		t.Errorf("listen helper exited cleanly, want it killed by SIGTERM")
 	}
 }
 
