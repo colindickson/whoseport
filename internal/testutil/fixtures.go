@@ -1,21 +1,5 @@
 package testutil
 
-import (
-	"time"
-
-	"github.com/bluehoodie/whoseport/internal/model"
-)
-
-// SampleLsofOutput returns a typical lsof output for testing
-func SampleLsofOutput() string {
-	return `node    12345 testuser   21u  IPv4 0x123456      0t0  TCP *:8080 (LISTEN)`
-}
-
-// SampleLsofOutputMultipleFields returns lsof output with more complex formatting
-func SampleLsofOutputMultipleFields() string {
-	return `python3    9876 www-data   3u  IPv6 0xabcdef      0t0  TCP *:3000 (LISTEN)`
-}
-
 // SampleProcStatus returns sample content from /proc/[pid]/status
 func SampleProcStatus() string {
 	return `Name:	node
@@ -142,53 +126,4 @@ btime 1609459200
 processes 123456
 procs_running 2
 procs_blocked 0`
-}
-
-// MockProcessInfo creates a fully populated ProcessInfo for testing
-func MockProcessInfo() *model.ProcessInfo {
-	return &model.ProcessInfo{
-		// Basic lsof fields
-		Command:    "node",
-		ID:         12345,
-		User:       "testuser",
-		FD:         "21u",
-		Type:       "IPv4",
-		Device:     "0x123456",
-		SizeOffset: "0t0",
-		Node:       "TCP",
-		Name:       "*:8080 (LISTEN)",
-
-		// Enhanced fields
-		FullCommand:     "/usr/local/bin/node /app/server.js",
-		PPid:            1000,
-		ParentCommand:   "bash",
-		State:           "S",
-		Threads:         4,
-		WorkingDir:      "/app",
-		MemoryRSS:       48000,
-		MemoryVMS:       120000,
-		CPUTime:         17.0,
-		StartTime:       time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
-		Uptime:          "1d 0h 0m 0s",
-		OpenFDs:         256,
-		MaxFDs:          1024,
-		UID:             1001,
-		GID:             1001,
-		Groups:          "1001",
-		NetworkConns:    2,
-		TCPConns:        []string{"127.0.0.1:8080 -> *:* (LISTEN)"},
-		UDPConns:        []string{},
-		ExePath:         "/usr/local/bin/node",
-		ExeSize:         4096,
-		NiceValue:       0,
-		Priority:        20,
-		EnvCount:        15,
-		ChildCount:      0,
-		IOReadBytes:     1048576,
-		IOWriteBytes:    2097152,
-		IOReadSyscalls:  123456,
-		IOWriteSyscalls: 98765,
-		CPUPercent:      5.5,
-		MemoryLimit:     -1,
-	}
 }
