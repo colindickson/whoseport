@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/bluehoodie/whoseport/internal/display/format"
+	"github.com/bluehoodie/whoseport/internal/model"
 )
 
 func captureOutput(fn func()) string {
@@ -58,6 +59,37 @@ func TestPrintModernSectionAlignment(t *testing.T) {
 	// Verify the title appears in the output
 	if !strings.Contains(stripped, "PROCESS IDENTITY") {
 		t.Fatalf("expected section to contain title text, got: %s", stripped)
+	}
+}
+
+// TestDisplayHidesEnvCountWhenZero guards against presenting an unmeasured
+// value as fact: on macOS EnvCount is always 0 (SIP blocks reading another
+// process's environment), so printing "Environment Vars: 0" would falsely
+// claim the process has no environment. It should be omitted, matching how
+// MemoryLimit and ChildCount are already conditionally rendered.
+func TestDisplayHidesEnvCountWhenZero(t *testing.T) {
+	d := NewDisplayer()
+	info := &model.ProcessInfo{ExePath: "/usr/bin/node", EnvCount: 0}
+
+	output := captureOutput(func() {
+		d.Display(info, 8080)
+	})
+
+	if strings.Contains(output, "Environment Vars") {
+		t.Fatalf("expected Environment Vars to be omitted when EnvCount is 0, got:\n%s", output)
+	}
+}
+
+func TestDisplayShowsEnvCountWhenPositive(t *testing.T) {
+	d := NewDisplayer()
+	info := &model.ProcessInfo{ExePath: "/usr/bin/node", EnvCount: 15}
+
+	output := captureOutput(func() {
+		d.Display(info, 8080)
+	})
+
+	if !strings.Contains(output, "Environment Vars") {
+		t.Fatalf("expected Environment Vars to be shown when EnvCount > 0, got:\n%s", output)
 	}
 }
 

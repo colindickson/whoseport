@@ -50,7 +50,9 @@ func (d *Displayer) Display(info *model.ProcessInfo, port int) {
 		if info.ExeSize > 0 {
 			d.printEnhancedField("Binary Size", format.FormatBytes(info.ExeSize), terminal.ColorTeal, "")
 		}
-		d.printEnhancedField("Environment Vars", fmt.Sprintf("%d", info.EnvCount), terminal.ColorLavender, "")
+		if info.EnvCount > 0 {
+			d.printEnhancedField("Environment Vars", fmt.Sprintf("%d", info.EnvCount), terminal.ColorLavender, "")
+		}
 		if info.WorkingDir != "" {
 			d.printEnhancedField("Working Directory", info.WorkingDir, terminal.ColorSkyBlue, "")
 		}
