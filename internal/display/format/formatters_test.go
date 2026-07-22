@@ -3,6 +3,7 @@ package format
 import (
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bluehoodie/whoseport/internal/terminal"
 )
@@ -169,7 +170,7 @@ func TestTruncate(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("Truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 			}
-			if !isValidUTF8(got) {
+			if !utf8.ValidString(got) {
 				t.Errorf("Truncate(%q, %d) = %q is not valid UTF-8", tt.input, tt.maxLen, got)
 			}
 		})
@@ -202,9 +203,8 @@ func TestStripAnsiCodes(t *testing.T) {
 }
 
 func TestGetStateColor(t *testing.T) {
-	// nil falls back to terminal.DefaultTheme(), byte-identical to the
-	// old hard-coded colors.
-	nilCases := []struct {
+	// The default theme is byte-identical to the old hard-coded colors.
+	defaultCases := []struct {
 		state string
 		want  string
 	}{
@@ -214,11 +214,11 @@ func TestGetStateColor(t *testing.T) {
 		{"Stopped", "\033[33m"},
 		{"Unknown", "\033[37m"},
 	}
-	for _, tt := range nilCases {
-		t.Run("nil/"+tt.state, func(t *testing.T) {
-			got := GetStateColor(tt.state, nil)
+	for _, tt := range defaultCases {
+		t.Run("default/"+tt.state, func(t *testing.T) {
+			got := GetStateColor(tt.state, terminal.DefaultTheme())
 			if got != tt.want {
-				t.Errorf("GetStateColor(%q, nil) = %q, want %q", tt.state, got, tt.want)
+				t.Errorf("GetStateColor(%q, default) = %q, want %q", tt.state, got, tt.want)
 			}
 		})
 	}
@@ -249,13 +249,4 @@ func TestGetStateColor(t *testing.T) {
 			}
 		})
 	}
-}
-
-func isValidUTF8(s string) bool {
-	for _, r := range s {
-		if r == '�' {
-			return false
-		}
-	}
-	return true
 }

@@ -147,28 +147,15 @@ func GetStateEmoji(state string) string {
 }
 
 // GetStateColor returns the theme color for a process state.
-//
-// theme is accepted as interface{}, not terminal.Theme, purely so that
-// cmd/whoseport/main_test.go (owned by another agent) can keep passing nil
-// without a build break; there is no real circular-dependency constraint
-// (internal/terminal imports nothing). When theme is a terminal.Theme, its
-// State* fields are used; otherwise terminal.DefaultTheme() is used, which
-// is byte-identical to the old hard-coded colors.
-// ponytail: switch this to a plain terminal.Theme parameter once
-// main_test.go's nil call site is updated to pass a real theme.
-func GetStateColor(state string, theme interface{}) string {
-	th, ok := theme.(terminal.Theme)
-	if !ok {
-		th = terminal.DefaultTheme()
-	}
+func GetStateColor(state string, theme terminal.Theme) string {
 	if strings.Contains(state, "Running") {
-		return th.StateRunning
+		return theme.StateRunning
 	} else if strings.Contains(state, "Sleeping") {
-		return th.StateSleeping
+		return theme.StateSleeping
 	} else if strings.Contains(state, "Zombie") {
-		return th.StateZombie
+		return theme.StateZombie
 	} else if strings.Contains(state, "Stopped") {
-		return th.StateStopped
+		return theme.StateStopped
 	}
-	return th.StateDefault
+	return theme.StateDefault
 }
