@@ -3,6 +3,7 @@ package format
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
@@ -21,6 +22,29 @@ func FormatBytes(bytes int64) string {
 	} else {
 		return fmt.Sprintf("%.2f GB", float64(bytes)/(1024*1024*1024))
 	}
+}
+
+// FormatDuration formats a duration to human-readable string, e.g.
+// "2h 30m 15s" or "1d 0h 0m 0s".
+func FormatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
+	parts := []string{}
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 || days > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 || hours > 0 || days > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	parts = append(parts, fmt.Sprintf("%ds", seconds))
+
+	return strings.Join(parts, " ")
 }
 
 // FormatMemory converts KB to human-readable format

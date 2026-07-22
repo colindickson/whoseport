@@ -3,13 +3,13 @@
 package procfs
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bluehoodie/whoseport/internal/display/format"
 	"github.com/bluehoodie/whoseport/internal/model"
 )
 
@@ -365,23 +365,11 @@ func ExpandState(state string) string {
 }
 
 // FormatDuration formats a duration to human-readable string.
+//
+// ponytail: this is a thin delegate to format.FormatDuration, kept exported
+// here (and duplicated in enhancer_linux.go) only because
+// cmd/whoseport/main_test.go still calls procfs.FormatDuration directly.
+// Once that test is repointed at format.FormatDuration, delete both wrappers.
 func FormatDuration(d time.Duration) string {
-	days := int(d.Hours() / 24)
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	parts := []string{}
-	if days > 0 {
-		parts = append(parts, fmt.Sprintf("%dd", days))
-	}
-	if hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%dh", hours))
-	}
-	if minutes > 0 || hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%dm", minutes))
-	}
-	parts = append(parts, fmt.Sprintf("%ds", seconds))
-
-	return strings.Join(parts, " ")
+	return format.FormatDuration(d)
 }

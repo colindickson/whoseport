@@ -2,9 +2,34 @@ package format
 
 import (
 	"testing"
+	"time"
 
 	"github.com/bluehoodie/whoseport/internal/terminal"
 )
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		want     string
+	}{
+		{"zero", 0, "0s"},
+		{"seconds", 30 * time.Second, "30s"},
+		{"minutes", 5 * time.Minute, "5m 0s"},
+		{"hours", 2 * time.Hour, "2h 0m 0s"},
+		{"days", 24 * time.Hour, "1d 0h 0m 0s"},
+		{"mixed", 2*time.Hour + 30*time.Minute + 15*time.Second, "2h 30m 15s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatDuration(tt.duration)
+			if got != tt.want {
+				t.Errorf("FormatDuration(%v) = %q, want %q", tt.duration, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestVisualWidth(t *testing.T) {
 	tests := []struct {
