@@ -126,9 +126,8 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 		}
 	}
 
-	// Get network connections using lsof
-	info.TCPConns = getNetworkConnectionsLsof(pid, "TCP")
-	info.UDPConns = getNetworkConnectionsLsof(pid, "UDP")
+	// Get network connections using lsof (single call, split by protocol)
+	info.TCPConns, info.UDPConns = getNetworkConnectionsLsof(pid)
 	info.NetworkConns = len(info.TCPConns) + len(info.UDPConns)
 
 	// Note: macOS doesn't easily provide IO statistics without specialized APIs
@@ -266,9 +265,7 @@ func parseElapsedDuration(etime string) time.Duration {
 	return time.Duration(totalSeconds) * time.Second
 }
 
-func getNetworkConnectionsLsof(pid int, protocol string) []string {
-	var connections []string
-
+func getNetworkConnectionsLsof(pid int) (tcpConns, udpConns []string) {
 	// -a: AND the selection criteria (internet files AND this PID)
 	// -i: internet files
 	// -n: no hostname resolution
@@ -277,10 +274,17 @@ func getNetworkConnectionsLsof(pid int, protocol string) []string {
 	cmd := exec.Command("lsof", "-a", "-i", "-n", "-P", "-p", strconv.Itoa(pid))
 	output, err := cmd.Output()
 	if err != nil {
-		return connections
+		return nil, nil
 	}
 
-	lines := strings.Split(string(output), "\n")
+	return parseNetworkConnections(string(output))
+}
+
+// parseNetworkConnections splits a single `lsof -a -i -n -P -p PID` output
+// into TCP and UDP connection strings, so both protocols come from one
+// subprocess call instead of two identical ones.
+func parseNetworkConnections(output string) (tcpConns, udpConns []string) {
+	lines := strings.Split(output, "\n")
 	for i, line := range lines {
 		if i == 0 || strings.TrimSpace(line) == "" {
 			continue // Skip header
@@ -291,11 +295,6 @@ func getNetworkConnectionsLsof(pid int, protocol string) []string {
 			continue
 		}
 
-		// Check if this is the right protocol
-		if !strings.HasPrefix(fields[7], protocol) {
-			continue
-		}
-
 		// fields[8] contains the connection info (e.g., "localhost:8080->localhost:52242 (ESTABLISHED)")
 		connInfo := fields[8]
 		if len(fields) > 9 {
@@ -303,10 +302,15 @@ func getNetworkConnectionsLsof(pid int, protocol string) []string {
 			connInfo += " " + strings.Join(fields[9:], " ")
 		}
 
-		connections = append(connections, connInfo)
+		switch {
+		case strings.HasPrefix(fields[7], "TCP"):
+			tcpConns = append(tcpConns, connInfo)
+		case strings.HasPrefix(fields[7], "UDP"):
+			udpConns = append(udpConns, connInfo)
+		}
 	}
 
-	return connections
+	return tcpConns, udpConns
 }
 
 // ExpandState expands process state code to human-readable string (macOS version).
