@@ -65,8 +65,14 @@ func TestIsDockerPortHandler(t *testing.T) {
 		{name: "com.docker.backend", command: "com.docker.backend", expected: true},
 		{name: "bare docker", command: "docker", expected: true},
 		{name: "case insensitive", command: "Docker-Proxy", expected: true},
+		{name: "rootlesskit builtin port driver", command: "rootlesskit", expected: true},
+		{name: "rootlesskit with path", command: "/usr/bin/rootlesskit", expected: true},
+		{name: "rootlesskit docker-proxy port driver child", command: "rootlesskit-docker-proxy", expected: true},
+		{name: "slirp4netns port driver child", command: "slirp4netns", expected: true},
 		{name: "unrelated binary launched from a path containing docker", command: "node", expected: false},
 		{name: "unrelated binary name merely containing docker", command: "dockerized-app", expected: false},
+		{name: "unrelated binary name resembling docker helper", command: "my-docker-helper", expected: false},
+		{name: "unrelated binary launched from a directory named docker", command: "/opt/docker/bin/myapp", expected: false},
 		{name: "empty command", command: "", expected: false},
 	}
 

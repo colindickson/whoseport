@@ -38,9 +38,12 @@ var dockerCgroupPattern = regexp.MustCompile(`/docker[/-]([a-f0-9]{64})`)
 // port on behalf of a Docker container (as opposed to any process whose command line
 // merely mentions "docker", e.g. one launched from a path containing that word).
 var dockerPortHandlerNames = map[string]bool{
-	"docker-proxy":       true, // Linux: forwards a published port to the container
-	"com.docker.backend": true, // macOS: Docker Desktop's port-handling process
-	"docker":             true,
+	"docker-proxy":             true, // Linux: forwards a published port to the container
+	"com.docker.backend":       true, // macOS: Docker Desktop's port-handling process
+	"docker":                   true,
+	"rootlesskit":              true, // Linux rootless (default "builtin" port driver): binds the host port itself
+	"rootlesskit-docker-proxy": true, // Linux rootless ("docker-proxy" port driver): child process rootlesskit spawns to bind the host port
+	"slirp4netns":              true, // Linux rootless ("slirp4netns" port driver): child process that binds the host port
 }
 
 // isDockerPortHandler reports whether command is one of the known Docker binaries that
