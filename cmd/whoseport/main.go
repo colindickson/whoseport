@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -132,13 +133,12 @@ func handleDockerContainer(containerID string, processInfo *model.ProcessInfo, p
 
 	// Display the container info
 	if jsonFlag {
-		// For JSON mode, we could output the container info as JSON
-		// For now, fall back to process info JSON
-		displayer := displayjson.NewDisplayer()
-		if err := displayer.Display(processInfo); err != nil {
+		out, err := json.MarshalIndent(containerInfo, "", "  ")
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "%serror:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 			os.Exit(1)
 		}
+		fmt.Println(string(out))
 	} else {
 		displayer := docker.NewDisplayer()
 		displayer.Display(containerInfo, port)
