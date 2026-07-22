@@ -96,15 +96,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Enhance with detailed process information
+	// Enhance with detailed process information. Non-fatal: still show what we have.
 	enhancer := procfs.NewProcessEnhancer()
-	enhancer.Enhance(processInfo)
+	if err := enhancer.Enhance(processInfo); err != nil {
+		fmt.Fprintf(os.Stderr, "%swarning:%s could not fully enhance process info: %v\n", terminal.ColorYellow, terminal.ColorReset, err)
+	}
 
-	// Check if this is a Docker container process
+	// Check if this is a Docker container process. Non-fatal: fall back to regular process display.
 	detector := dockerpkg.NewDetector()
 	isDocker, containerID, err := detector.IsDockerRelated(processInfo, port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%swarning:%s could not check for Docker container: %v\n", terminal.ColorYellow, terminal.ColorReset, err)
+	}
 
-	if err == nil && isDocker && containerID != "" {
+	if isDocker && containerID != "" {
 		// Docker container detected - use Docker-specific workflow
 		handleDockerContainer(containerID, processInfo, port)
 	} else {
