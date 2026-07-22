@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
+
+// statsTimeout bounds how long `docker stats` may run so a wedged daemon
+// can't hang the CLI.
+const statsTimeout = 5 * time.Second
 
 // Retriever retrieves detailed Docker container information.
 type Retriever interface {
@@ -179,8 +184,11 @@ func (r *DefaultRetriever) parseInspectOutput(info *ContainerInfo, output []byte
 
 // populateStatsData uses docker stats to get real-time resource usage.
 func (r *DefaultRetriever) populateStatsData(info *ContainerInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
+	defer cancel()
+
 	// Use --no-stream to get a single snapshot
-	cmd := exec.Command("docker", "stats", "--no-stream", "--format",
+	cmd := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format",
 		"{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}",
 		info.ID)
 
