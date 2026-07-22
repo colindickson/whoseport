@@ -9,28 +9,21 @@ import (
 	"syscall"
 
 	"github.com/bluehoodie/whoseport/internal/model"
+	"github.com/bluehoodie/whoseport/internal/terminal"
 )
 
 // Prompter handles user prompts for process actions
 // Following Dependency Inversion Principle: depends on io interfaces
 type Prompter struct {
-	reader      io.Reader
-	writer      io.Writer
-	colorBold   string
-	colorYellow string
-	colorCyan   string
-	colorReset  string
+	reader io.Reader
+	writer io.Writer
 }
 
 // NewPrompter creates a new Prompter with stdin/stdout
 func NewPrompter() *Prompter {
 	return &Prompter{
-		reader:      os.Stdin,
-		writer:      os.Stdout,
-		colorBold:   "\033[1m",
-		colorYellow: "\033[33m",
-		colorCyan:   "\033[36m",
-		colorReset:  "\033[0m",
+		reader: os.Stdin,
+		writer: os.Stdout,
 	}
 }
 
@@ -38,12 +31,8 @@ func NewPrompter() *Prompter {
 // Following Open/Closed Principle: extensible via constructor injection
 func NewPrompterWithIO(reader io.Reader, writer io.Writer) *Prompter {
 	return &Prompter{
-		reader:      reader,
-		writer:      writer,
-		colorBold:   "\033[1m",
-		colorYellow: "\033[33m",
-		colorCyan:   "\033[36m",
-		colorReset:  "\033[0m",
+		reader: reader,
+		writer: writer,
 	}
 }
 
@@ -51,11 +40,11 @@ func NewPrompterWithIO(reader io.Reader, writer io.Writer) *Prompter {
 // Returns the selected signal and true if user wants to kill, or nil and false if cancelled
 func (p *Prompter) PromptKillAction(info *model.ProcessInfo) (syscall.Signal, bool) {
 	fmt.Fprintf(p.writer, "%s%s⚠️  Process %d (%s) - Select action:%s\n",
-		p.colorBold, p.colorYellow, info.ID, info.Command, p.colorReset)
+		terminal.ColorBold, terminal.ColorYellow, info.ID, info.Command, terminal.ColorReset)
 	fmt.Fprintf(p.writer, "  [1] SIGTERM (15) - Graceful termination\n")
 	fmt.Fprintf(p.writer, "  [2] SIGKILL (9)  - Force kill (cannot be caught)\n")
 	fmt.Fprintf(p.writer, "  [3] Cancel\n")
-	fmt.Fprintf(p.writer, "%sChoice [3]:%s ", p.colorBold, p.colorReset)
+	fmt.Fprintf(p.writer, "%sChoice [3]:%s ", terminal.ColorBold, terminal.ColorReset)
 
 	scanner := bufio.NewScanner(p.reader)
 
@@ -79,8 +68,8 @@ func (p *Prompter) PromptKillAction(info *model.ProcessInfo) (syscall.Signal, bo
 		case "3":
 			return 0, false
 		default:
-			fmt.Fprintf(p.writer, "%sInvalid choice. Please enter 1-3.%s\n", p.colorYellow, p.colorReset)
-			fmt.Fprintf(p.writer, "%sChoice [3]:%s ", p.colorBold, p.colorReset)
+			fmt.Fprintf(p.writer, "%sInvalid choice. Please enter 1-3.%s\n", terminal.ColorYellow, terminal.ColorReset)
+			fmt.Fprintf(p.writer, "%sChoice [3]:%s ", terminal.ColorBold, terminal.ColorReset)
 		}
 	}
 }
