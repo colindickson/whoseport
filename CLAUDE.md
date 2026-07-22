@@ -123,7 +123,7 @@ internal/
 ```
 Port Number
     ↓
-lsof + grep (LISTEN filter)
+lsof -sTCP:LISTEN -F (field-mode output, no grep subprocess)
     ↓
 Parse lsof output → ProcessInfo struct
     ↓
@@ -140,7 +140,7 @@ Optional: Kill process with SIGTERM/SIGKILL
 ```
 Port Number
     ↓
-lsof + grep (LISTEN filter)
+lsof -sTCP:LISTEN -F (field-mode output, no grep subprocess)
     ↓
 Parse lsof output → ProcessInfo struct
     ↓
