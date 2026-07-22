@@ -3,11 +3,15 @@ package process
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
+
+// ErrNoService is returned when no process is listening on the requested port.
+var ErrNoService = errors.New("no service listening on port")
 
 // LsofParser parses lsof -F (field output mode) into a ProcessInfo.
 type LsofParser struct{}
@@ -93,7 +97,7 @@ func (p *LsofParser) Parse(output []byte) (*model.ProcessInfo, error) {
 	}
 
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("no service found on this port")
+		return nil, ErrNoService
 	}
 
 	e := entries[0]

@@ -1,24 +1,26 @@
 package process
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
 
 func TestLsofParser_Parse(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		wantCmd    string
-		wantPID    int
-		wantUser   string
-		wantFD     string
-		wantType   string
-		wantDevice string
-		wantOffset string
-		wantNode   string
-		wantName   string
-		wantErrAny bool
+		name         string
+		input        string
+		wantCmd      string
+		wantPID      int
+		wantUser     string
+		wantFD       string
+		wantType     string
+		wantDevice   string
+		wantOffset   string
+		wantNode     string
+		wantName     string
+		wantErrAny   bool
+		wantSentinel bool // if true, err must satisfy errors.Is(err, ErrNoService)
 	}{
 		{
 			name: "single row",
@@ -99,14 +101,16 @@ func TestLsofParser_Parse(t *testing.T) {
 			wantName: "*:8080 (LISTEN)",
 		},
 		{
-			name:       "empty input",
-			input:      "",
-			wantErrAny: true,
+			name:         "empty input",
+			input:        "",
+			wantErrAny:   true,
+			wantSentinel: true,
 		},
 		{
-			name:       "no file records - process record only",
-			input:      "p623\ncrapportd\nLcolindickson\n",
-			wantErrAny: true,
+			name:         "no file records - process record only",
+			input:        "p623\ncrapportd\nLcolindickson\n",
+			wantErrAny:   true,
+			wantSentinel: true,
 		},
 		{
 			name:       "malformed - non-numeric pid",
@@ -123,6 +127,9 @@ func TestLsofParser_Parse(t *testing.T) {
 			if tt.wantErrAny {
 				if err == nil {
 					t.Fatalf("Parse() error = nil, want error")
+				}
+				if tt.wantSentinel && !errors.Is(err, ErrNoService) {
+					t.Errorf("Parse() error = %v, want errors.Is(err, ErrNoService)", err)
 				}
 				return
 			}
