@@ -163,46 +163,78 @@ The UI adapts to your terminal width (capped at 90 columns, floored at 40) inste
 
 ### JSON Mode
 
+This is real, unedited `whoseport --json` output (only the username and home directory
+path have been changed) against a process listening on port 8080:
+
 ```bash
 $ whoseport --json 8080
 ```
 
 ```json
 {
-  "command": "node",
-  "id": 42573,
+  "command": "python3.11",
+  "id": 27149,
   "user": "colin",
-  "fd": "7u",
+  "fd": "3u",
   "type": "IPv4",
-  "device": "0x5e4b104643390241",
+  "device": "0xcc12b4321643610c",
   "size_offset": "0t0",
   "node": "TCP",
-  "name": "*:8080 (LISTEN)",
-  "full_command": "node server.js --port 8080",
-  "ppid": 41234,
-  "parent_command": "bash",
-  "state": "S",
-  "threads": 12,
-  "working_dir": "/home/colin/projects",
-  "memory_rss_kb": 127488,
-  "memory_vms_kb": 2457600,
-  "cpu_time_seconds": 45.23,
-  "start_time": "2025-11-01 10:23:15",
-  "uptime": "2h 34m",
-  "open_fds": 23,
-  "max_fds": 1024,
+  "name": "127.0.0.1:8080 (LISTEN)",
+  "full_command": "/Users/colin/.pyenv/versions/3.11.14/bin/python3 -m http.server 8080 --bind 127.0.0.1",
+  "ppid": 27147,
+  "parent_command": "/bin/zsh",
+  "state": "Sleeping (low-priority)",
+  "threads": 1,
+  "working_dir": "/",
+  "memory_rss_kb": 21136,
+  "memory_vms_kb": 435278224,
+  "cpu_time_seconds": 0.08,
+  "start_time": "2026-07-22 00:00:40",
+  "uptime": "3s",
+  "open_fds": 28,
+  "max_fds": 256,
   "uid": 501,
   "gid": 20,
-  "network_connections": 5,
+  "groups": "",
+  "network_connections": 1,
   "tcp_connections": [
-    "192.168.1.100:45678 → 192.168.1.50:8080 ESTABLISHED",
-    "192.168.1.101:45679 → 192.168.1.50:8080 ESTABLISHED"
+    "127.0.0.1:8080 (LISTEN)"
   ],
-  "exe_path": "/usr/local/bin/node",
-  "exe_size_bytes": 49643520,
-  "io_read_bytes": 1048576,
-  "io_write_bytes": 524288
+  "udp_connections": null,
+  "exe_path": "/Users/colin/.pyenv/versions/3.11.14/bin/python3",
+  "exe_size_bytes": 33816,
+  "nice_value": 5,
+  "priority": 31,
+  "env_count": 0,
+  "child_count": 0,
+  "io_read_bytes": 0,
+  "io_write_bytes": 0,
+  "io_read_syscalls": 0,
+  "io_write_syscalls": 0,
+  "memory_limit_kb": 0,
+  "cpu_percent": 0
 }
+```
+
+`fd` carries lsof's access-mode suffix (`r`/`w`/`u`) appended to the descriptor number,
+e.g. `"10u"`.
+
+**Platform-dependent fields** - this example was captured on macOS, where several fields
+are always zero/empty because the underlying data isn't available without `/proc`:
+- `groups`, `env_count`, `io_read_bytes`, `io_write_bytes`, `io_read_syscalls`,
+  `io_write_syscalls`, `memory_limit_kb` are Linux-only; on macOS they're always `0`/`""`.
+  `env_count` is `0` on macOS even for the caller's own child processes - modern macOS
+  (SIP) blocks reading another process's environment.
+- `state` is a human-readable expansion of the OS process state and its exact wording
+  differs by platform (e.g. `"Sleeping (interruptible)"` on Linux vs.
+  `"Sleeping (low-priority)"` on macOS above).
+- `udp_connections` is `null` when a process has no UDP sockets.
+
+`--json` output stays parseable even combined with `-k`/`-t` - their confirmation/error
+messages go to stderr, not stdout:
+```bash
+whoseport --json -t 8080 | python3 -m json.tool
 ```
 
 ## Docker Container Support
