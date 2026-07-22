@@ -47,7 +47,7 @@ func main() {
 		fmt.Printf("  %s-k, --kill%s            Kill the process using the port (SIGKILL - force kill)\n", terminal.ColorYellow, terminal.ColorReset)
 		fmt.Printf("  %s-t, --term%s            Terminate the process using the port (SIGTERM - graceful)\n", terminal.ColorYellow, terminal.ColorReset)
 		fmt.Printf("  %s-n, --no-interactive%s  Disable interactive mode (show info only)\n", terminal.ColorYellow, terminal.ColorReset)
-		fmt.Printf("  %s--json%s                Output in JSON format\n", terminal.ColorYellow, terminal.ColorReset)
+		fmt.Printf("  %s--json%s                Output in JSON format (implies -n)\n", terminal.ColorYellow, terminal.ColorReset)
 		fmt.Printf("\n%sNote:%s Interactive mode is enabled by default\n", terminal.ColorBold, terminal.ColorReset)
 		fmt.Printf("\n%sExample:%s\n", terminal.ColorBold, terminal.ColorReset)
 		fmt.Printf("  whoseport 8080           # Show detailed info with interactive prompt\n")
@@ -56,6 +56,12 @@ func main() {
 		fmt.Printf("  whoseport -t 8080        # Gracefully terminate without prompting (SIGTERM)\n")
 	}
 	flag.Parse()
+
+	// --json output must stay parseable, so it implies non-interactive mode:
+	// otherwise the interactive kill prompt writes to the same stdout stream.
+	if jsonFlag {
+		noInteractive = true
+	}
 
 	// Validate flags
 	if killFlag && termFlag {
