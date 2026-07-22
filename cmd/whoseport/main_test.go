@@ -162,8 +162,8 @@ func TestCLI_Help(t *testing.T) {
 // NOTE: lsof output parsing used to be tested here (TestToProcessInfo), but
 // it asserted against a parser input format (a single space-delimited line)
 // that no longer exists -- process.NewLsofParser() now parses lsof -F
-// field-mode output, and its output no longer resembles this test's
-// expectations at all (hence the two failures below). That coverage lives in
+// field-mode output, so the old test had been failing outright since the
+// parser was rewritten. That coverage lives in
 // internal/process/parser_test.go (TestLsofParser_Parse) instead, which is
 // strictly stronger: it also covers multi-row/multi-PID lsof output and the
 // ErrNoService sentinel.
