@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -542,12 +543,12 @@ func TestIsNoServiceError(t *testing.T) {
 		},
 		{
 			name: "no service found error",
-			err:  errors.New("no service found on this port"),
+			err:  process.ErrNoService,
 			want: true,
 		},
 		{
 			name: "wrapped no service found error",
-			err:  errors.New("failed to parse lsof output: no service found on this port"),
+			err:  fmt.Errorf("failed to parse lsof output: %w", process.ErrNoService),
 			want: true,
 		},
 		{

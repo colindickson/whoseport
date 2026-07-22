@@ -1,11 +1,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/bluehoodie/whoseport/internal/action"
@@ -28,10 +28,7 @@ var (
 
 // isNoServiceError checks if the error indicates no service was found on the port
 func isNoServiceError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "no service found")
+	return errors.Is(err, process.ErrNoService)
 }
 
 func main() {
