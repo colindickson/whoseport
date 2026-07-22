@@ -71,12 +71,6 @@ func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bo
 		return true, containerID, nil
 	}
 
-	// Strategy 4: Try to find container by scanning /proc/{pid}/environ for Docker env vars (Linux)
-	containerID, err = d.checkEnvironForContainer(info.ID)
-	if err == nil && containerID != "" {
-		return true, containerID, nil
-	}
-
 	return false, "", nil
 }
 
@@ -267,40 +261,4 @@ func (d *DefaultDetector) checkCgroupForContainer(pid int) (string, error) {
 	}
 
 	return "", scanner.Err()
-}
-
-// checkEnvironForContainer checks process environment variables for Docker-specific vars.
-func (d *DefaultDetector) checkEnvironForContainer(pid int) (string, error) {
-	environFile := fmt.Sprintf("/proc/%d/environ", pid)
-	data, err := os.ReadFile(environFile)
-	if err != nil {
-		return "", err
-	}
-
-	// Environment variables are null-separated
-	envVars := strings.Split(string(data), "\x00")
-
-	// Look for HOSTNAME which in Docker containers is usually the short container ID
-	// or other Docker-specific environment variables
-	var hostname string
-	for _, env := range envVars {
-		if strings.HasPrefix(env, "HOSTNAME=") {
-			hostname = strings.TrimPrefix(env, "HOSTNAME=")
-			break
-		}
-	}
-
-	if hostname == "" {
-		return "", nil
-	}
-
-	// Try to find a container with matching hostname (short ID)
-	cmd := exec.Command("docker", "ps", "-q", "--filter", fmt.Sprintf("id=%s", hostname))
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-
-	containerID := strings.TrimSpace(string(output))
-	return containerID, nil
 }
