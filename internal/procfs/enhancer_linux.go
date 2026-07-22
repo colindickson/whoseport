@@ -167,8 +167,6 @@ func parseStatus(status string, info *model.ProcessInfo) {
 			if len(fields) > 1 {
 				info.Groups = strings.Join(fields[1:], " ")
 			}
-		case "FDSize":
-			info.MaxFDs, _ = strconv.Atoi(fields[1])
 		}
 	}
 }
@@ -260,6 +258,13 @@ func parseLimits(limits string, info *model.ProcessInfo) {
 						info.MemoryLimit = limitVal / 1024
 					}
 				}
+			}
+		}
+		if strings.Contains(line, "Max open files") {
+			fields := strings.Fields(line)
+			// "Max" "open" "files" <soft> <hard> "files"
+			if len(fields) >= 4 && fields[3] != "unlimited" {
+				info.MaxFDs, _ = strconv.Atoi(fields[3])
 			}
 		}
 	}

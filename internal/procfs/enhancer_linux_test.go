@@ -50,3 +50,32 @@ func TestParseStatNoSpacesInComm(t *testing.T) {
 		t.Errorf("CPUTime = %v, want 1.5", info.CPUTime)
 	}
 }
+
+// TestParseLimitsMaxFDs verifies MaxFDs comes from the "Max open files" soft
+// limit (an RLIMIT_NOFILE ceiling), not from FDSize (a table-allocation
+// count that has nothing to do with the limit).
+func TestParseLimitsMaxFDs(t *testing.T) {
+	limits := "Limit                     Soft Limit           Hard Limit           Units\n" +
+		"Max open files            1024                 4096                 files\n"
+
+	info := &model.ProcessInfo{}
+	parseLimits(limits, info)
+
+	if info.MaxFDs != 1024 {
+		t.Errorf("MaxFDs = %d, want 1024", info.MaxFDs)
+	}
+}
+
+// TestParseLimitsMaxFDsUnlimited ensures an unlimited soft limit does not
+// get parsed as a bogus numeric value.
+func TestParseLimitsMaxFDsUnlimited(t *testing.T) {
+	limits := "Limit                     Soft Limit           Hard Limit           Units\n" +
+		"Max open files            unlimited            unlimited            files\n"
+
+	info := &model.ProcessInfo{}
+	parseLimits(limits, info)
+
+	if info.MaxFDs != 0 {
+		t.Errorf("MaxFDs = %d, want 0 (unset)", info.MaxFDs)
+	}
+}
