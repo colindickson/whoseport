@@ -41,21 +41,24 @@ func main() {
 	flag.BoolVar(&noInteractive, "n", false, "Disable interactive mode (shorthand)")
 	flag.BoolVar(&jsonFlag, "json", false, "Output in JSON format")
 
+	// Usage and argument errors go to stderr so that stdout carries only the
+	// requested output; `whoseport --json bad-port | jq` must not be fed help text.
 	flag.Usage = func() {
-		fmt.Printf("%s%sUsage of whoseport:%s\n", terminal.ColorBold, terminal.ColorCyan, terminal.ColorReset)
-		fmt.Printf("  %swhoseport [options] {port}%s\n\n", terminal.ColorWhite, terminal.ColorReset)
-		fmt.Printf("%sOptions:%s\n", terminal.ColorBold, terminal.ColorReset)
-		fmt.Printf("  %s-k, --kill%s            Kill the process using the port (SIGKILL - force kill)\n", terminal.ColorYellow, terminal.ColorReset)
-		fmt.Printf("  %s-t, --term%s            Terminate the process using the port (SIGTERM - graceful)\n", terminal.ColorYellow, terminal.ColorReset)
-		fmt.Printf("  %s-n, --no-interactive%s  Disable interactive mode (show info only)\n", terminal.ColorYellow, terminal.ColorReset)
-		fmt.Printf("  %s--json%s                Output in JSON format (implies -n)\n", terminal.ColorYellow, terminal.ColorReset)
-		fmt.Printf("\n%sNote:%s Interactive mode is enabled by default\n", terminal.ColorBold, terminal.ColorReset)
-		fmt.Printf("%sNote:%s On a Docker-backed port, -k and -t both stop the container (docker stop); neither removes it. Removing a container is only offered as an explicit choice in the interactive menu.\n", terminal.ColorBold, terminal.ColorReset)
-		fmt.Printf("\n%sExample:%s\n", terminal.ColorBold, terminal.ColorReset)
-		fmt.Printf("  whoseport 8080           # Show detailed info with interactive prompt\n")
-		fmt.Printf("  whoseport -n 8080        # Show info only, no prompt\n")
-		fmt.Printf("  whoseport -k 8080        # Force kill without prompting (SIGKILL)\n")
-		fmt.Printf("  whoseport -t 8080        # Gracefully terminate without prompting (SIGTERM)\n")
+		w := flag.CommandLine.Output()
+		fmt.Fprintf(w, "%s%sUsage of whoseport:%s\n", terminal.ColorBold, terminal.ColorCyan, terminal.ColorReset)
+		fmt.Fprintf(w, "  %swhoseport [options] {port}%s\n\n", terminal.ColorWhite, terminal.ColorReset)
+		fmt.Fprintf(w, "%sOptions:%s\n", terminal.ColorBold, terminal.ColorReset)
+		fmt.Fprintf(w, "  %s-k, --kill%s            Kill the process using the port (SIGKILL - force kill)\n", terminal.ColorYellow, terminal.ColorReset)
+		fmt.Fprintf(w, "  %s-t, --term%s            Terminate the process using the port (SIGTERM - graceful)\n", terminal.ColorYellow, terminal.ColorReset)
+		fmt.Fprintf(w, "  %s-n, --no-interactive%s  Disable interactive mode (show info only)\n", terminal.ColorYellow, terminal.ColorReset)
+		fmt.Fprintf(w, "  %s--json%s                Output in JSON format (implies -n)\n", terminal.ColorYellow, terminal.ColorReset)
+		fmt.Fprintf(w, "\n%sNote:%s Interactive mode is enabled by default\n", terminal.ColorBold, terminal.ColorReset)
+		fmt.Fprintf(w, "%sNote:%s On a Docker-backed port, -k and -t both stop the container (docker stop); neither removes it. Removing a container is only offered as an explicit choice in the interactive menu.\n", terminal.ColorBold, terminal.ColorReset)
+		fmt.Fprintf(w, "\n%sExample:%s\n", terminal.ColorBold, terminal.ColorReset)
+		fmt.Fprintf(w, "  whoseport 8080           # Show detailed info with interactive prompt\n")
+		fmt.Fprintf(w, "  whoseport -n 8080        # Show info only, no prompt\n")
+		fmt.Fprintf(w, "  whoseport -k 8080        # Force kill without prompting (SIGKILL)\n")
+		fmt.Fprintf(w, "  whoseport -t 8080        # Gracefully terminate without prompting (SIGTERM)\n")
 	}
 	flag.Parse()
 
@@ -67,20 +70,20 @@ func main() {
 
 	// Validate flags
 	if killFlag && termFlag {
-		fmt.Printf("%serror:%s cannot use both -k/--kill and -t/--term flags together\n", terminal.ColorRed, terminal.ColorReset)
+		fmt.Fprintf(os.Stderr, "%serror:%s cannot use both -k/--kill and -t/--term flags together\n", terminal.ColorRed, terminal.ColorReset)
 		flag.Usage()
 		os.Exit(1)
 	}
 
 	if flag.NArg() < 1 {
-		fmt.Printf("%serror:%s missing port number\n", terminal.ColorRed, terminal.ColorReset)
+		fmt.Fprintf(os.Stderr, "%serror:%s missing port number\n", terminal.ColorRed, terminal.ColorReset)
 		flag.Usage()
 		os.Exit(1)
 	}
 
 	port, err := strconv.Atoi(flag.Arg(0))
 	if err != nil {
-		fmt.Printf("%serror:%s port must be an integer\n", terminal.ColorRed, terminal.ColorReset)
+		fmt.Fprintf(os.Stderr, "%serror:%s port must be an integer\n", terminal.ColorRed, terminal.ColorReset)
 		flag.Usage()
 		os.Exit(1)
 	}

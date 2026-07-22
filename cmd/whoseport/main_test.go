@@ -252,12 +252,42 @@ func TestCLI_JSONActionOutputStaysParseable(t *testing.T) {
 // TestCLI_Help verifies --help documents every flag whoseport actually
 // registers, so a change to main.go's flag set can't silently drop one from
 // the usage text.
+//
+// Usage goes to stderr, matching the flag package's own convention, so that a
+// usage dump triggered by a bad argument can never corrupt a --json pipeline.
+// The empty-stdout assertion is what stops that regressing.
 func TestCLI_Help(t *testing.T) {
-	stdout, _, _ := runCLI(t, "--help")
+	stdout, stderr, _ := runCLI(t, "--help")
 
 	for _, want := range []string{"-k", "--kill", "-t", "--term", "-n", "--no-interactive", "--json"} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("--help output missing %q\noutput:\n%s", want, stdout)
+		if !strings.Contains(stderr, want) {
+			t.Errorf("--help output missing %q\nstderr:\n%s", want, stderr)
+		}
+	}
+	if stdout != "" {
+		t.Errorf("--help wrote %q to stdout, want usage on stderr only", stdout)
+	}
+}
+
+// TestCLI_ArgErrorsStayOffStdout pins the reason usage lives on stderr: a
+// malformed port must not feed a wall of ANSI help text into a `--json | jq`
+// pipeline. Exit status alone is not enough, since a pipeline sees the bytes
+// before it sees the status.
+func TestCLI_ArgErrorsStayOffStdout(t *testing.T) {
+	for _, args := range [][]string{
+		{"--json", "notaport"},
+		{"--json"},
+		{"--json", "-k", "-t", "8080"},
+	} {
+		stdout, stderr, code := runCLI(t, args...)
+		if code == 0 {
+			t.Errorf("runCLI(%v) exited 0, want non-zero", args)
+		}
+		if stdout != "" {
+			t.Errorf("runCLI(%v) wrote %q to stdout, want it empty", args, stdout)
+		}
+		if stderr == "" {
+			t.Errorf("runCLI(%v) wrote nothing to stderr, want an error message", args)
 		}
 	}
 }
