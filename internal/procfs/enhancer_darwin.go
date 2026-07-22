@@ -112,22 +112,13 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 		}
 	}
 
-	// Count environment variables
-	cmd = exec.Command("ps", "-p", strconv.Itoa(pid), "-E")
-	if output, err := cmd.Output(); err == nil {
-		lines := strings.Split(string(output), "\n")
-		// First line is header, second line is the process, rest are env vars
-		if len(lines) > 2 {
-			// Count non-empty lines after the process line
-			count := 0
-			for i := 2; i < len(lines); i++ {
-				if strings.TrimSpace(lines[i]) != "" {
-					count++
-				}
-			}
-			info.EnvCount = count
-		}
-	}
+	// ponytail: EnvCount is left at 0 on macOS. `ps -E`/`ps e` puts the
+	// environment on the process's own single line (not one var per line
+	// as this code used to assume), and on modern macOS (verified on
+	// 26.2/Tahoe) it prints no environment at all, even for the caller's
+	// own child processes - SIP blocks it. If a real need for this shows
+	// up, look at proc_pidpath-style APIs via cgo; not worth it for a
+	// decorative field.
 
 	// Count child processes
 	cmd = exec.Command("pgrep", "-P", strconv.Itoa(pid))
