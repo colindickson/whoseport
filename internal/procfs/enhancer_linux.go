@@ -16,19 +16,22 @@ import (
 )
 
 // ProcessEnhancer enhances ProcessInfo with /proc filesystem data.
-type ProcessEnhancer struct{}
+type ProcessEnhancer struct {
+	root string // location of the proc filesystem, "/proc" in production
+}
 
 // NewProcessEnhancer creates a new ProcessEnhancer.
 func NewProcessEnhancer() *ProcessEnhancer {
-	return &ProcessEnhancer{}
+	return &ProcessEnhancer{root: "/proc"}
 }
 
 // Enhance populates ProcessInfo with data from /proc filesystem.
 func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	pid := info.ID
+	root := e.root
 
 	// Read /proc/[pid]/cmdline for full command
-	if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
+	if cmdline, err := os.ReadFile(fmt.Sprintf("%s/%d/cmdline", root, pid)); err == nil {
 		info.FullCommand = strings.ReplaceAll(string(bytes.TrimSpace(cmdline)), "\x00", " ")
 		if info.FullCommand == "" {
 			info.FullCommand = info.Command
@@ -36,22 +39,22 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Read /proc/[pid]/status
-	if status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid)); err == nil {
+	if status, err := os.ReadFile(fmt.Sprintf("%s/%d/status", root, pid)); err == nil {
 		parseStatus(string(status), info)
 	}
 
 	// Read /proc/[pid]/stat
-	if stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
-		parseStat(string(stat), info)
+	if stat, err := os.ReadFile(fmt.Sprintf("%s/%d/stat", root, pid)); err == nil {
+		parseStat(string(stat), info, root)
 	}
 
 	// Get working directory
-	if cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid)); err == nil {
+	if cwd, err := os.Readlink(fmt.Sprintf("%s/%d/cwd", root, pid)); err == nil {
 		info.WorkingDir = cwd
 	}
 
 	// Get executable path and size
-	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+	if exe, err := os.Readlink(fmt.Sprintf("%s/%d/exe", root, pid)); err == nil {
 		info.ExePath = exe
 		if stat, err := os.Stat(exe); err == nil {
 			info.ExeSize = stat.Size()
@@ -59,12 +62,12 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Count open file descriptors
-	if fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid)); err == nil {
+	if fds, err := os.ReadDir(fmt.Sprintf("%s/%d/fd", root, pid)); err == nil {
 		info.OpenFDs = len(fds)
 	}
 
 	// Count environment variables
-	if environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid)); err == nil {
+	if environ, err := os.ReadFile(fmt.Sprintf("%s/%d/environ", root, pid)); err == nil {
 		envVars := bytes.Split(environ, []byte{0})
 		info.EnvCount = len(envVars) - 1
 		if info.EnvCount < 0 {
@@ -73,21 +76,21 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Count child processes
-	info.ChildCount = countChildren(pid)
+	info.ChildCount = countChildren(root, pid)
 
 	// Get IO statistics
-	if io, err := os.ReadFile(fmt.Sprintf("/proc/%d/io", pid)); err == nil {
+	if io, err := os.ReadFile(fmt.Sprintf("%s/%d/io", root, pid)); err == nil {
 		parseIO(string(io), info)
 	}
 
 	// Get limits
-	if limits, err := os.ReadFile(fmt.Sprintf("/proc/%d/limits", pid)); err == nil {
+	if limits, err := os.ReadFile(fmt.Sprintf("%s/%d/limits", root, pid)); err == nil {
 		parseLimits(string(limits), info)
 	}
 
 	// Get parent process info
 	if info.PPid > 0 {
-		if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", info.PPid)); err == nil {
+		if cmdline, err := os.ReadFile(fmt.Sprintf("%s/%d/cmdline", root, info.PPid)); err == nil {
 			parentCmd := strings.ReplaceAll(string(bytes.TrimSpace(cmdline)), "\x00", " ")
 			if parentCmd != "" {
 				parts := strings.Fields(parentCmd)
@@ -97,15 +100,15 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 			}
 		}
 		if info.ParentCommand == "" {
-			if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", info.PPid)); err == nil {
+			if comm, err := os.ReadFile(fmt.Sprintf("%s/%d/comm", root, info.PPid)); err == nil {
 				info.ParentCommand = strings.TrimSpace(string(comm))
 			}
 		}
 	}
 
 	// Get network connections
-	info.TCPConns = getNetworkConnections(pid, "tcp")
-	info.UDPConns = getNetworkConnections(pid, "udp")
+	info.TCPConns = getNetworkConnections(root, pid, "tcp")
+	info.UDPConns = getNetworkConnections(root, pid, "udp")
 	info.NetworkConns = len(info.TCPConns) + len(info.UDPConns)
 
 	return nil
@@ -152,7 +155,7 @@ func parseStatus(status string, info *model.ProcessInfo) {
 // "Web Content" processes), so every field after it must be located relative
 // to the LAST ')' rather than by naive whitespace splitting of the whole
 // line (see man 5 proc).
-func parseStat(stat string, info *model.ProcessInfo) {
+func parseStat(stat string, info *model.ProcessInfo, root string) {
 	lastParen := strings.LastIndex(stat, ")")
 	if lastParen == -1 || lastParen+1 >= len(stat) {
 		return
@@ -184,7 +187,7 @@ func parseStat(stat string, info *model.ProcessInfo) {
 	info.CPUTime = clockTicks / 100.0
 
 	starttime, _ := strconv.ParseInt(fields[idxStarttime], 10, 64)
-	bootTime := getBootTime()
+	bootTime := getBootTime(root)
 	startTimeSec := bootTime + (starttime / 100)
 	startTimeObj := time.Unix(startTimeSec, 0)
 	info.StartTime = startTimeObj.Format("2006-01-02 15:04:05")
@@ -262,8 +265,8 @@ func parseLimits(limits string, info *model.ProcessInfo) {
 	}
 }
 
-func getBootTime() int64 {
-	data, err := os.ReadFile("/proc/stat")
+func getBootTime(root string) int64 {
+	data, err := os.ReadFile(fmt.Sprintf("%s/stat", root))
 	if err != nil {
 		return time.Now().Unix()
 	}
@@ -281,10 +284,10 @@ func getBootTime() int64 {
 	return time.Now().Unix()
 }
 
-func getNetworkConnections(pid int, protocol string) []string {
+func getNetworkConnections(root string, pid int, protocol string) []string {
 	var connections []string
 
-	inodes := getProcessInodes(pid)
+	inodes := getProcessInodes(root, pid)
 	if len(inodes) == 0 {
 		return connections
 	}
@@ -292,8 +295,8 @@ func getNetworkConnections(pid int, protocol string) []string {
 	// Both the IPv4 (e.g. "tcp") and IPv6 (e.g. "tcp6") variants need to be
 	// read; the kernel keeps them in separate files.
 	for _, file := range []string{
-		fmt.Sprintf("/proc/net/%s", protocol),
-		fmt.Sprintf("/proc/net/%s6", protocol),
+		fmt.Sprintf("%s/net/%s", root, protocol),
+		fmt.Sprintf("%s/net/%s6", root, protocol),
 	} {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -335,8 +338,8 @@ func getNetworkConnections(pid int, protocol string) []string {
 // countChildren sums the child PIDs listed in /proc/[pid]/task/[tid]/children
 // across all of the process's threads, instead of scanning every entry in
 // /proc and reading each one's status file.
-func countChildren(pid int) int {
-	taskDir := fmt.Sprintf("/proc/%d/task", pid)
+func countChildren(root string, pid int) int {
+	taskDir := fmt.Sprintf("%s/%d/task", root, pid)
 	tasks, err := os.ReadDir(taskDir)
 	if err != nil {
 		return 0
@@ -357,10 +360,10 @@ func countChildren(pid int) int {
 	return count
 }
 
-func getProcessInodes(pid int) map[string]bool {
+func getProcessInodes(root string, pid int) map[string]bool {
 	inodes := make(map[string]bool)
 
-	fdPath := fmt.Sprintf("/proc/%d/fd", pid)
+	fdPath := fmt.Sprintf("%s/%d/fd", root, pid)
 	fds, err := os.ReadDir(fdPath)
 	if err != nil {
 		return inodes

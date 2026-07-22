@@ -18,7 +18,7 @@ func TestParseStatCommWithSpacesAndParens(t *testing.T) {
 	stat := "1234 (Web Content (weird)) S 1 2 3 4 5 6 7 8 9 10 111 222 13 14 17 18 1 0 999900 extra fields here"
 
 	info := &model.ProcessInfo{}
-	parseStat(stat, info)
+	parseStat(stat, info, "")
 
 	if info.Priority != 17 {
 		t.Errorf("Priority = %d, want 17", info.Priority)
@@ -38,7 +38,7 @@ func TestParseStatNoSpacesInComm(t *testing.T) {
 	stat := "1234 (bash) S 1 2 3 4 5 6 7 8 9 10 100 50 13 14 20 0 1 0 500000 extra"
 
 	info := &model.ProcessInfo{}
-	parseStat(stat, info)
+	parseStat(stat, info, "")
 
 	if info.Priority != 20 {
 		t.Errorf("Priority = %d, want 20", info.Priority)
