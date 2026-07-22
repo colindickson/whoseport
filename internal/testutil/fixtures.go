@@ -125,10 +125,11 @@ func SampleProcNetUDP() string {
 }
 
 // SampleProcNetTCP6 returns sample content from /proc/net/tcp6, listening on
-// the IPv6 wildcard address.
+// the IPv6 loopback address on a port distinct from the IPv4 fixtures so
+// tests can confirm this file was actually read.
 func SampleProcNetTCP6() string {
 	return `  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-   0: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 999999 1 0000000000000000 100 0 0 10 0`
+   0: 00000000000000000000000001000000:2382 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 999999 1 0000000000000000 100 0 0 10 0`
 }
 
 // SampleProcStat returns sample content from /proc/stat for boot time
