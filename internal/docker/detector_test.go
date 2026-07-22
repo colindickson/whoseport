@@ -1,13 +1,16 @@
 package docker
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
 
 func TestExtractContainerIPFromProxy(t *testing.T) {
-	detector := &DefaultDetector{dockerAvailable: true}
+	detector := &DefaultDetector{}
 
 	tests := []struct {
 		name        string
@@ -77,8 +80,36 @@ func TestIsDockerPortHandler(t *testing.T) {
 	}
 }
 
+func TestDockerAvailableProbesOnlyOnce(t *testing.T) {
+	// Fake "docker" binary on PATH that records each invocation and succeeds.
+	dir := t.TempDir()
+	countFile := filepath.Join(dir, "count")
+	script := "#!/bin/sh\necho x >> " + countFile + "\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake docker script: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	d := &DefaultDetector{}
+	if !d.dockerAvailable() {
+		t.Fatalf("expected dockerAvailable() to be true with fake docker on PATH")
+	}
+	if !d.dockerAvailable() {
+		t.Fatalf("expected cached dockerAvailable() to still be true")
+	}
+
+	data, err := os.ReadFile(countFile)
+	if err != nil {
+		t.Fatalf("fake docker script was never invoked: %v", err)
+	}
+	invocations := strings.Count(string(data), "x\n")
+	if invocations != 1 {
+		t.Errorf("expected docker to be probed exactly once, got %d invocations", invocations)
+	}
+}
+
 func TestCheckCgroupForContainer(t *testing.T) {
-	detector := &DefaultDetector{dockerAvailable: true}
+	detector := &DefaultDetector{}
 
 	// Note: This test will only work on systems with /proc filesystem
 	// For a process running in Docker, we expect to find a container ID
@@ -92,7 +123,7 @@ func TestCheckCgroupForContainer(t *testing.T) {
 }
 
 func TestContainerHasPort(t *testing.T) {
-	detector := &DefaultDetector{dockerAvailable: true}
+	detector := &DefaultDetector{}
 
 	tests := []struct {
 		name     string

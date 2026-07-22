@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,9 +11,15 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
+
+// dockerProbeTimeout bounds how long we wait for a wedged or unreachable Docker daemon
+// before giving up on Docker detection entirely.
+const dockerProbeTimeout = 2 * time.Second
 
 // dockerPortHandlerNames are the known executable names of processes that own a host
 // port on behalf of a Docker container (as opposed to any process whose command line
@@ -40,33 +47,35 @@ type Detector interface {
 
 // DefaultDetector implements Docker detection logic.
 type DefaultDetector struct {
-	dockerAvailable bool
+	availableOnce sync.Once
+	available     bool
 }
 
 // NewDetector creates a new Docker detector.
 func NewDetector() Detector {
-	detector := &DefaultDetector{}
-	detector.checkDockerAvailability()
-	return detector
+	return &DefaultDetector{}
 }
 
-// checkDockerAvailability verifies if Docker CLI is available.
-func (d *DefaultDetector) checkDockerAvailability() {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
-	err := cmd.Run()
-	d.dockerAvailable = err == nil
+// dockerAvailable reports whether the Docker CLI can reach a daemon. The check is only
+// performed the first time it's needed (a strategy is about to shell out to docker), and
+// the result is cached for the lifetime of the detector. A short timeout keeps a wedged
+// or unreachable daemon from hanging every whoseport invocation.
+func (d *DefaultDetector) dockerAvailable() bool {
+	d.availableOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), dockerProbeTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+		d.available = cmd.Run() == nil
+	})
+	return d.available
 }
 
 // IsDockerRelated determines if a process is Docker-related and returns the container ID.
 func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bool, string, error) {
-	if !d.dockerAvailable {
-		return false, "", nil
-	}
-
 	// Strategy 1: If the process is a known Docker port-handling binary, query Docker for
 	// containers using this port. This works on both Linux and macOS (including Docker
 	// Desktop where com.docker.backend handles ports).
-	if isDockerPortHandler(info.Command) {
+	if isDockerPortHandler(info.Command) && d.dockerAvailable() {
 		containerID := d.findContainerByPort(port)
 		if containerID != "" {
 			return true, containerID, nil
@@ -75,7 +84,7 @@ func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bo
 
 	// Strategy 2: Check if the process is docker-proxy (Linux)
 	// docker-proxy is the process that forwards ports from host to container
-	if strings.Contains(info.Command, "docker-proxy") {
+	if strings.Contains(info.Command, "docker-proxy") && d.dockerAvailable() {
 		containerID := d.findContainerFromDockerProxy(info)
 		if containerID != "" {
 			return true, containerID, nil
