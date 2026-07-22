@@ -98,6 +98,12 @@ func TestParseInspectOutput(t *testing.T) {
 	if info.State != "running" || info.Status != "running" {
 		t.Errorf("State/Status = %q/%q, want running/running", info.State, info.Status)
 	}
+	// CreatedAt must come from the top-level "Created" field, not
+	// State.StartedAt (a container created last week and started an
+	// hour ago has different values for each).
+	if info.CreatedAt != "2026-07-04T14:40:17.086539796Z" {
+		t.Errorf("CreatedAt = %q, want the top-level Created timestamp", info.CreatedAt)
+	}
 	if info.ImageID != "9de60a6b3cad" {
 		t.Errorf("ImageID = %q, want %q", info.ImageID, "9de60a6b3cad")
 	}

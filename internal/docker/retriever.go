@@ -128,7 +128,7 @@ func (r *DefaultRetriever) parseInspectOutput(info *ContainerInfo, output []byte
 
 	info.State = data.State.Status
 	info.Status = data.State.Status
-	info.CreatedAt = data.State.StartedAt
+	info.CreatedAt = data.Created
 	if t, err := time.Parse(time.RFC3339Nano, data.State.StartedAt); err == nil {
 		info.RunningFor = formatDuration(time.Since(t))
 	}
