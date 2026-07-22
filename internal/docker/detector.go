@@ -116,7 +116,9 @@ func (d *DefaultDetector) findContainerByPort(port int) string {
 	return ""
 }
 
-// containerHasPort checks if the ports string contains a mapping from the given host port.
+// containerHasPort checks if the ports string contains a TCP mapping from the given host port.
+// whoseport only ever looks for TCP listeners (lsof is filtered to LISTEN state), so a container
+// publishing the same port number over UDP must not be treated as a match.
 func (d *DefaultDetector) containerHasPort(portsStr string, port int) bool {
 	portStr := strconv.Itoa(port)
 
@@ -130,14 +132,19 @@ func (d *DefaultDetector) containerHasPort(portsStr string, port int) bool {
 		// "0.0.0.0:8080->80/tcp"
 		// ":::8080->80/tcp"
 		// "*:8080->80/tcp"
+		// "8080->80/tcp"
 
-		// Extract host port (the part before ->)
-		parts := strings.Split(mapping, "->")
-		if len(parts) < 1 {
+		// Split into host part and "containerPort/proto" (the part after ->)
+		hostPart, containerPart, ok := strings.Cut(mapping, "->")
+		if !ok {
 			continue
 		}
 
-		hostPart := parts[0]
+		// Only TCP mappings are relevant.
+		_, proto, ok := strings.Cut(containerPart, "/")
+		if !ok || !strings.EqualFold(proto, "tcp") {
+			continue
+		}
 
 		// Host part can be:
 		// "0.0.0.0:8080"
@@ -146,12 +153,13 @@ func (d *DefaultDetector) containerHasPort(portsStr string, port int) bool {
 		// "8080"
 
 		// Extract port from host part
-		lastColon := strings.LastIndex(hostPart, ":")
-		if lastColon != -1 {
-			hostPort := hostPart[lastColon+1:]
-			if hostPort == portStr {
-				return true
-			}
+		hostPort := hostPart
+		if lastColon := strings.LastIndex(hostPart, ":"); lastColon != -1 {
+			hostPort = hostPart[lastColon+1:]
+		}
+
+		if hostPort == portStr {
+			return true
 		}
 	}
 

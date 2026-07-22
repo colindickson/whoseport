@@ -116,6 +116,30 @@ func TestContainerHasPort(t *testing.T) {
 			port:     3000,
 			expected: true,
 		},
+		{
+			name:     "udp mapping does not match a tcp lookup",
+			portsStr: "0.0.0.0:8080->80/udp",
+			port:     8080,
+			expected: false,
+		},
+		{
+			name:     "udp mapping among mixed protocols does not match",
+			portsStr: "0.0.0.0:8080->80/udp, :::8080->80/udp",
+			port:     8080,
+			expected: false,
+		},
+		{
+			name:     "tcp mapping matches even when a udp mapping for the same port exists",
+			portsStr: "0.0.0.0:8080->80/udp, 0.0.0.0:8080->80/tcp",
+			port:     8080,
+			expected: true,
+		},
+		{
+			name:     "bare port with no host ip still matches on tcp",
+			portsStr: "8080->80/tcp",
+			port:     8080,
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
