@@ -5,6 +5,7 @@ package procfs
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -313,37 +314,43 @@ func getNetworkConnections(pid int, protocol string) []string {
 		return connections
 	}
 
-	file := fmt.Sprintf("/proc/net/%s", protocol)
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return connections
-	}
-
-	lines := strings.Split(string(data), "\n")
-	for i, line := range lines {
-		if i == 0 || strings.TrimSpace(line) == "" {
+	// Both the IPv4 (e.g. "tcp") and IPv6 (e.g. "tcp6") variants need to be
+	// read; the kernel keeps them in separate files.
+	for _, file := range []string{
+		fmt.Sprintf("/proc/net/%s", protocol),
+		fmt.Sprintf("/proc/net/%s6", protocol),
+	} {
+		data, err := os.ReadFile(file)
+		if err != nil {
 			continue
 		}
 
-		fields := strings.Fields(line)
-		if len(fields) < 10 {
-			continue
-		}
-
-		inode := fields[9]
-		if _, exists := inodes[inode]; exists {
-			localAddr := ParseAddress(fields[1])
-			remoteAddr := ParseAddress(fields[2])
-			state := ""
-			if protocol == "tcp" && len(fields) > 3 {
-				state = ParseTCPState(fields[3])
+		lines := strings.Split(string(data), "\n")
+		for i, line := range lines {
+			if i == 0 || strings.TrimSpace(line) == "" {
+				continue
 			}
 
-			connStr := fmt.Sprintf("%s -> %s", localAddr, remoteAddr)
-			if state != "" {
-				connStr += fmt.Sprintf(" [%s]", state)
+			fields := strings.Fields(line)
+			if len(fields) < 10 {
+				continue
 			}
-			connections = append(connections, connStr)
+
+			inode := fields[9]
+			if _, exists := inodes[inode]; exists {
+				localAddr := ParseAddress(fields[1])
+				remoteAddr := ParseAddress(fields[2])
+				state := ""
+				if protocol == "tcp" && len(fields) > 3 {
+					state = ParseTCPState(fields[3])
+				}
+
+				connStr := fmt.Sprintf("%s -> %s", localAddr, remoteAddr)
+				if state != "" {
+					connStr += fmt.Sprintf(" [%s]", state)
+				}
+				connections = append(connections, connStr)
+			}
 		}
 	}
 
@@ -454,24 +461,41 @@ func ParseAddress(hex string) string {
 	ip := HexToIP(parts[0])
 	port, _ := strconv.ParseInt(parts[1], 16, 64)
 
-	if ip == "0.0.0.0" || ip == "0:0:0:0:0:0:0:0" {
+	if ip == "0.0.0.0" || ip == "::" {
 		return fmt.Sprintf("*:%d", port)
 	}
 
 	return fmt.Sprintf("%s:%d", ip, port)
 }
 
-// HexToIP converts hex string to IP address.
+// HexToIP converts a /proc/net/{tcp,udp}[6] hex address to an IP string.
+// IPv4 addresses are 4 bytes; IPv6 addresses are 16 bytes stored as 4
+// little-endian 32-bit words. In both cases the raw bytes are byte-reversed
+// per 32-bit word relative to a plain big-endian hex decode.
 func HexToIP(hex string) string {
-	if len(hex) == 8 {
-		var parts []string
-		for i := 6; i >= 0; i -= 2 {
-			val, _ := strconv.ParseInt(hex[i:i+2], 16, 64)
-			parts = append(parts, fmt.Sprintf("%d", val))
+	switch len(hex) {
+	case 8:
+		return net.IP(reverseHexWords(hex)).String()
+	case 32:
+		b := make([]byte, 0, 16)
+		for w := 0; w < 4; w++ {
+			b = append(b, reverseHexWords(hex[w*8:w*8+8])...)
 		}
-		return strings.Join(parts, ".")
+		return net.IP(b).String()
 	}
-	return "IPv6"
+	return hex
+}
+
+// reverseHexWords decodes an 8-character (4-byte) hex string and reverses
+// the byte order, matching the little-endian word encoding /proc/net uses
+// for addresses.
+func reverseHexWords(hex string) []byte {
+	b := make([]byte, 4)
+	for i := 0; i < 4; i++ {
+		val, _ := strconv.ParseUint(hex[i*2:i*2+2], 16, 8)
+		b[3-i] = byte(val)
+	}
+	return b
 }
 
 // ParseTCPState parses hex TCP state to string.

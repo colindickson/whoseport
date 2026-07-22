@@ -110,3 +110,48 @@ func TestParseLimitsMemoryLimitFinite(t *testing.T) {
 		t.Errorf("MemoryLimit = %d, want 1024", info.MemoryLimit)
 	}
 }
+
+// TestHexToIPv6 verifies IPv6 addresses from /proc/net/tcp6 (32 hex chars,
+// 4 little-endian 32-bit words) are decoded instead of returning the
+// literal string "IPv6".
+func TestHexToIPv6(t *testing.T) {
+	tests := []struct {
+		name string
+		hex  string
+		want string
+	}{
+		{"loopback ::1", "00000000000000000000000001000000", "::1"},
+		{"unspecified ::", "00000000000000000000000000000000", "::"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := HexToIP(tt.hex)
+			if got != tt.want {
+				t.Errorf("HexToIP(%q) = %v, want %v", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseAddressIPv6 verifies IPv6 loopback/unspecified addresses format
+// correctly through ParseAddress, including the "*" wildcard for unspecified.
+func TestParseAddressIPv6(t *testing.T) {
+	tests := []struct {
+		name string
+		hex  string
+		want string
+	}{
+		{"loopback:8080", "00000000000000000000000001000000:1F90", "::1:8080"},
+		{"unspecified:3000", "00000000000000000000000000000000:0BB8", "*:3000"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseAddress(tt.hex)
+			if got != tt.want {
+				t.Errorf("ParseAddress(%q) = %v, want %v", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
