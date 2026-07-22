@@ -19,7 +19,7 @@ type Displayer struct {
 func NewDisplayer() *Displayer {
 	return &Displayer{
 		theme: terminal.DefaultTheme(),
-		width: 90,
+		width: terminal.Width(),
 	}
 }
 
