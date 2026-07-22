@@ -20,7 +20,7 @@ func TestProcessRetriever_GetProcessByPort(t *testing.T) {
 		{
 			name:       "successful retrieval",
 			port:       8080,
-			execOutput: testutil.SampleLsofOutput(),
+			execOutput: "p12345\ncnode\nLtestuser\nf21\ntIPv4\nPTCP\nn*:8080\n",
 			execErr:    nil,
 			wantCmd:    "node",
 			wantPID:    12345,
