@@ -73,32 +73,7 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Count child processes
-	if tasks, err := os.ReadDir("/proc"); err == nil {
-		for _, task := range tasks {
-			if !task.IsDir() {
-				continue
-			}
-			childPid, err := strconv.Atoi(task.Name())
-			if err != nil {
-				continue
-			}
-			if status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", childPid)); err == nil {
-				lines := strings.Split(string(status), "\n")
-				for _, line := range lines {
-					if strings.HasPrefix(line, "PPid:") {
-						fields := strings.Fields(line)
-						if len(fields) >= 2 {
-							ppid, _ := strconv.Atoi(fields[1])
-							if ppid == pid {
-								info.ChildCount++
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-	}
+	info.ChildCount = countChildren(pid)
 
 	// Get IO statistics
 	if io, err := os.ReadFile(fmt.Sprintf("/proc/%d/io", pid)); err == nil {
@@ -355,6 +330,31 @@ func getNetworkConnections(pid int, protocol string) []string {
 	}
 
 	return connections
+}
+
+// countChildren sums the child PIDs listed in /proc/[pid]/task/[tid]/children
+// across all of the process's threads, instead of scanning every entry in
+// /proc and reading each one's status file.
+func countChildren(pid int) int {
+	taskDir := fmt.Sprintf("/proc/%d/task", pid)
+	tasks, err := os.ReadDir(taskDir)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, task := range tasks {
+		data, err := os.ReadFile(filepath.Join(taskDir, task.Name(), "children"))
+		if err != nil {
+			// ponytail: /proc/[pid]/task/[tid]/children requires
+			// CONFIG_PROC_CHILDREN; if it's unavailable, ChildCount just
+			// stays 0 for this decorative field rather than falling back to
+			// a full /proc sweep.
+			continue
+		}
+		count += len(strings.Fields(string(data)))
+	}
+	return count
 }
 
 func getProcessInodes(pid int) map[string]bool {
