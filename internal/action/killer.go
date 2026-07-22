@@ -23,21 +23,11 @@ func NewKiller() Killer {
 // Kill terminates a process by PID with the specified signal
 // Follows Single Responsibility Principle: only sends signals to processes
 func (k *killer) Kill(pid int, signal syscall.Signal) error {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("failed to find process: %w", err)
-	}
+	// os.FindProcess never fails on Unix; the real error surfaces from Signal below.
+	process, _ := os.FindProcess(pid)
 
-	// Check if the process exists by sending signal 0
-	err = process.Signal(syscall.Signal(0))
-	if err != nil {
+	if err := process.Signal(signal); err != nil {
 		return fmt.Errorf("process with PID %d does not exist or is not accessible: %w", pid, err)
-	}
-
-	// Send the requested signal
-	err = process.Signal(signal)
-	if err != nil {
-		return fmt.Errorf("failed to send signal %v: %w", signal, err)
 	}
 
 	return nil

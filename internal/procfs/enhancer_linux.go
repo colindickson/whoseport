@@ -5,29 +5,34 @@ package procfs
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bluehoodie/whoseport/internal/display/format"
 	"github.com/bluehoodie/whoseport/internal/model"
 )
 
 // ProcessEnhancer enhances ProcessInfo with /proc filesystem data.
-type ProcessEnhancer struct{}
+type ProcessEnhancer struct {
+	root string // location of the proc filesystem, "/proc" in production
+}
 
 // NewProcessEnhancer creates a new ProcessEnhancer.
 func NewProcessEnhancer() *ProcessEnhancer {
-	return &ProcessEnhancer{}
+	return &ProcessEnhancer{root: "/proc"}
 }
 
 // Enhance populates ProcessInfo with data from /proc filesystem.
 func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	pid := info.ID
+	root := e.root
 
 	// Read /proc/[pid]/cmdline for full command
-	if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil {
+	if cmdline, err := os.ReadFile(fmt.Sprintf("%s/%d/cmdline", root, pid)); err == nil {
 		info.FullCommand = strings.ReplaceAll(string(bytes.TrimSpace(cmdline)), "\x00", " ")
 		if info.FullCommand == "" {
 			info.FullCommand = info.Command
@@ -35,22 +40,22 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Read /proc/[pid]/status
-	if status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid)); err == nil {
+	if status, err := os.ReadFile(fmt.Sprintf("%s/%d/status", root, pid)); err == nil {
 		parseStatus(string(status), info)
 	}
 
 	// Read /proc/[pid]/stat
-	if stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
-		parseStat(string(stat), info)
+	if stat, err := os.ReadFile(fmt.Sprintf("%s/%d/stat", root, pid)); err == nil {
+		parseStat(string(stat), info, root)
 	}
 
 	// Get working directory
-	if cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid)); err == nil {
+	if cwd, err := os.Readlink(fmt.Sprintf("%s/%d/cwd", root, pid)); err == nil {
 		info.WorkingDir = cwd
 	}
 
 	// Get executable path and size
-	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+	if exe, err := os.Readlink(fmt.Sprintf("%s/%d/exe", root, pid)); err == nil {
 		info.ExePath = exe
 		if stat, err := os.Stat(exe); err == nil {
 			info.ExeSize = stat.Size()
@@ -58,12 +63,12 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Count open file descriptors
-	if fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid)); err == nil {
+	if fds, err := os.ReadDir(fmt.Sprintf("%s/%d/fd", root, pid)); err == nil {
 		info.OpenFDs = len(fds)
 	}
 
 	// Count environment variables
-	if environ, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid)); err == nil {
+	if environ, err := os.ReadFile(fmt.Sprintf("%s/%d/environ", root, pid)); err == nil {
 		envVars := bytes.Split(environ, []byte{0})
 		info.EnvCount = len(envVars) - 1
 		if info.EnvCount < 0 {
@@ -72,46 +77,21 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	}
 
 	// Count child processes
-	if tasks, err := os.ReadDir("/proc"); err == nil {
-		for _, task := range tasks {
-			if !task.IsDir() {
-				continue
-			}
-			childPid, err := strconv.Atoi(task.Name())
-			if err != nil {
-				continue
-			}
-			if status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", childPid)); err == nil {
-				lines := strings.Split(string(status), "\n")
-				for _, line := range lines {
-					if strings.HasPrefix(line, "PPid:") {
-						fields := strings.Fields(line)
-						if len(fields) >= 2 {
-							ppid, _ := strconv.Atoi(fields[1])
-							if ppid == pid {
-								info.ChildCount++
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-	}
+	info.ChildCount = countChildren(root, pid)
 
 	// Get IO statistics
-	if io, err := os.ReadFile(fmt.Sprintf("/proc/%d/io", pid)); err == nil {
+	if io, err := os.ReadFile(fmt.Sprintf("%s/%d/io", root, pid)); err == nil {
 		parseIO(string(io), info)
 	}
 
 	// Get limits
-	if limits, err := os.ReadFile(fmt.Sprintf("/proc/%d/limits", pid)); err == nil {
+	if limits, err := os.ReadFile(fmt.Sprintf("%s/%d/limits", root, pid)); err == nil {
 		parseLimits(string(limits), info)
 	}
 
 	// Get parent process info
 	if info.PPid > 0 {
-		if cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", info.PPid)); err == nil {
+		if cmdline, err := os.ReadFile(fmt.Sprintf("%s/%d/cmdline", root, info.PPid)); err == nil {
 			parentCmd := strings.ReplaceAll(string(bytes.TrimSpace(cmdline)), "\x00", " ")
 			if parentCmd != "" {
 				parts := strings.Fields(parentCmd)
@@ -121,15 +101,15 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 			}
 		}
 		if info.ParentCommand == "" {
-			if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", info.PPid)); err == nil {
+			if comm, err := os.ReadFile(fmt.Sprintf("%s/%d/comm", root, info.PPid)); err == nil {
 				info.ParentCommand = strings.TrimSpace(string(comm))
 			}
 		}
 	}
 
 	// Get network connections
-	info.TCPConns = getNetworkConnections(pid, "tcp")
-	info.UDPConns = getNetworkConnections(pid, "udp")
+	info.TCPConns = getNetworkConnections(root, pid, "tcp")
+	info.UDPConns = getNetworkConnections(root, pid, "udp")
 	info.NetworkConns = len(info.TCPConns) + len(info.UDPConns)
 
 	return nil
@@ -167,38 +147,54 @@ func parseStatus(status string, info *model.ProcessInfo) {
 			if len(fields) > 1 {
 				info.Groups = strings.Join(fields[1:], " ")
 			}
-		case "FDSize":
-			info.MaxFDs, _ = strconv.Atoi(fields[1])
 		}
 	}
 }
 
-func parseStat(stat string, info *model.ProcessInfo) {
-	fields := strings.Fields(stat)
-	if len(fields) < 22 {
+// parseStat parses /proc/[pid]/stat. Field 2 (comm) is wrapped in
+// parentheses and can itself contain spaces and parentheses (e.g. Firefox's
+// "Web Content" processes), so every field after it must be located relative
+// to the LAST ')' rather than by naive whitespace splitting of the whole
+// line (see man 5 proc).
+func parseStat(stat string, info *model.ProcessInfo, root string) {
+	lastParen := strings.LastIndex(stat, ")")
+	if lastParen == -1 || lastParen+1 >= len(stat) {
 		return
 	}
 
-	if len(fields) > 17 {
-		info.Priority, _ = strconv.Atoi(fields[17])
-	}
-	if len(fields) > 18 {
-		info.NiceValue, _ = strconv.Atoi(fields[18])
+	// fields[0] is "state" (proc stat field 3); everything below is indexed
+	// relative to that.
+	fields := strings.Fields(stat[lastParen+1:])
+	const (
+		idxUtime     = 11 // field 14
+		idxStime     = 12 // field 15
+		idxPriority  = 15 // field 18
+		idxNice      = 16 // field 19
+		idxStarttime = 19 // field 22
+	)
+	if len(fields) <= idxStarttime {
+		return
 	}
 
-	utime, _ := strconv.ParseInt(fields[13], 10, 64)
-	stime, _ := strconv.ParseInt(fields[14], 10, 64)
+	info.Priority, _ = strconv.Atoi(fields[idxPriority])
+	info.NiceValue, _ = strconv.Atoi(fields[idxNice])
+
+	utime, _ := strconv.ParseInt(fields[idxUtime], 10, 64)
+	stime, _ := strconv.ParseInt(fields[idxStime], 10, 64)
 	clockTicks := float64(utime + stime)
+	// ponytail: assumes USER_HZ (sysconf(_SC_CLK_TCK)) == 100, true on
+	// virtually all Linux builds; add a sysconf lookup if a target ever uses
+	// a different tick rate.
 	info.CPUTime = clockTicks / 100.0
 
-	starttime, _ := strconv.ParseInt(fields[21], 10, 64)
-	bootTime := getBootTime()
+	starttime, _ := strconv.ParseInt(fields[idxStarttime], 10, 64)
+	bootTime := getBootTime(root)
 	startTimeSec := bootTime + (starttime / 100)
 	startTimeObj := time.Unix(startTimeSec, 0)
 	info.StartTime = startTimeObj.Format("2006-01-02 15:04:05")
 
 	uptime := time.Since(startTimeObj)
-	info.Uptime = FormatDuration(uptime)
+	info.Uptime = format.FormatDuration(uptime)
 
 	if uptime.Seconds() > 0 {
 		info.CPUPercent = (info.CPUTime / uptime.Seconds()) * 100.0
@@ -231,24 +227,47 @@ func parseIO(io string, info *model.ProcessInfo) {
 
 func parseLimits(limits string, info *model.ProcessInfo) {
 	lines := strings.Split(limits, "\n")
+
+	// sawMemoryLimit tracks whether a relevant limit line was found at all;
+	// haveFiniteMemoryLimit tracks whether any of those lines gave a real
+	// (non-unlimited) number. A -1 sentinel must not poison the running-min
+	// comparison, so it's tracked separately rather than compared directly.
+	sawMemoryLimit := false
+	haveFiniteMemoryLimit := false
+
 	for _, line := range lines {
 		if strings.Contains(line, "Max address space") || strings.Contains(line, "Max data size") {
 			fields := strings.Fields(line)
 			if len(fields) >= 4 {
+				sawMemoryLimit = true
 				limit := fields[3]
 				if limit != "unlimited" {
-					limitVal, _ := strconv.ParseInt(limit, 10, 64)
-					if info.MemoryLimit == 0 || limitVal < info.MemoryLimit {
-						info.MemoryLimit = limitVal / 1024
+					if limitVal, err := strconv.ParseInt(limit, 10, 64); err == nil {
+						limitVal /= 1024
+						if !haveFiniteMemoryLimit || limitVal < info.MemoryLimit {
+							info.MemoryLimit = limitVal
+							haveFiniteMemoryLimit = true
+						}
 					}
 				}
 			}
 		}
+		if strings.Contains(line, "Max open files") {
+			fields := strings.Fields(line)
+			// "Max" "open" "files" <soft> <hard> "files"
+			if len(fields) >= 4 && fields[3] != "unlimited" {
+				info.MaxFDs, _ = strconv.Atoi(fields[3])
+			}
+		}
+	}
+
+	if sawMemoryLimit && !haveFiniteMemoryLimit {
+		info.MemoryLimit = -1
 	}
 }
 
-func getBootTime() int64 {
-	data, err := os.ReadFile("/proc/stat")
+func getBootTime(root string) int64 {
+	data, err := os.ReadFile(fmt.Sprintf("%s/stat", root))
 	if err != nil {
 		return time.Now().Unix()
 	}
@@ -266,55 +285,86 @@ func getBootTime() int64 {
 	return time.Now().Unix()
 }
 
-func getNetworkConnections(pid int, protocol string) []string {
+func getNetworkConnections(root string, pid int, protocol string) []string {
 	var connections []string
 
-	inodes := getProcessInodes(pid)
+	inodes := getProcessInodes(root, pid)
 	if len(inodes) == 0 {
 		return connections
 	}
 
-	file := fmt.Sprintf("/proc/net/%s", protocol)
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return connections
-	}
-
-	lines := strings.Split(string(data), "\n")
-	for i, line := range lines {
-		if i == 0 || strings.TrimSpace(line) == "" {
+	// Both the IPv4 (e.g. "tcp") and IPv6 (e.g. "tcp6") variants need to be
+	// read; the kernel keeps them in separate files.
+	for _, file := range []string{
+		fmt.Sprintf("%s/net/%s", root, protocol),
+		fmt.Sprintf("%s/net/%s6", root, protocol),
+	} {
+		data, err := os.ReadFile(file)
+		if err != nil {
 			continue
 		}
 
-		fields := strings.Fields(line)
-		if len(fields) < 10 {
-			continue
-		}
-
-		inode := fields[9]
-		if _, exists := inodes[inode]; exists {
-			localAddr := ParseAddress(fields[1])
-			remoteAddr := ParseAddress(fields[2])
-			state := ""
-			if protocol == "tcp" && len(fields) > 3 {
-				state = ParseTCPState(fields[3])
+		lines := strings.Split(string(data), "\n")
+		for i, line := range lines {
+			if i == 0 || strings.TrimSpace(line) == "" {
+				continue
 			}
 
-			connStr := fmt.Sprintf("%s -> %s", localAddr, remoteAddr)
-			if state != "" {
-				connStr += fmt.Sprintf(" [%s]", state)
+			fields := strings.Fields(line)
+			if len(fields) < 10 {
+				continue
 			}
-			connections = append(connections, connStr)
+
+			inode := fields[9]
+			if _, exists := inodes[inode]; exists {
+				localAddr := ParseAddress(fields[1])
+				remoteAddr := ParseAddress(fields[2])
+				state := ""
+				if protocol == "tcp" && len(fields) > 3 {
+					state = ParseTCPState(fields[3])
+				}
+
+				connStr := fmt.Sprintf("%s -> %s", localAddr, remoteAddr)
+				if state != "" {
+					connStr += fmt.Sprintf(" [%s]", state)
+				}
+				connections = append(connections, connStr)
+			}
 		}
 	}
 
 	return connections
 }
 
-func getProcessInodes(pid int) map[string]bool {
+// countChildren sums the child PIDs listed in /proc/[pid]/task/[tid]/children
+// across all of the process's threads, instead of scanning every entry in
+// /proc and reading each one's status file.
+func countChildren(root string, pid int) int {
+	taskDir := fmt.Sprintf("%s/%d/task", root, pid)
+	tasks, err := os.ReadDir(taskDir)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, task := range tasks {
+		data, err := os.ReadFile(filepath.Join(taskDir, task.Name(), "children"))
+		if err != nil {
+			// ponytail: /proc/[pid]/task/[tid]/children requires
+			// CONFIG_PROC_CHILDREN; if it's unavailable, ChildCount just
+			// stays 0 for this decorative field rather than falling back to
+			// a full /proc sweep.
+			continue
+		}
+		count += len(strings.Fields(string(data)))
+	}
+	return count
+}
+
+func getProcessInodes(root string, pid int) map[string]bool {
 	inodes := make(map[string]bool)
 
-	fdPath := fmt.Sprintf("/proc/%d/fd", pid)
+	fdPath := fmt.Sprintf("%s/%d/fd", root, pid)
 	fds, err := os.ReadDir(fdPath)
 	if err != nil {
 		return inodes
@@ -383,28 +433,6 @@ func ExpandState(state string) string {
 	return state
 }
 
-// FormatDuration formats a duration to human-readable string.
-func FormatDuration(d time.Duration) string {
-	days := int(d.Hours() / 24)
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	parts := []string{}
-	if days > 0 {
-		parts = append(parts, fmt.Sprintf("%dd", days))
-	}
-	if hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%dh", hours))
-	}
-	if minutes > 0 || hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%dm", minutes))
-	}
-	parts = append(parts, fmt.Sprintf("%ds", seconds))
-
-	return strings.Join(parts, " ")
-}
-
 // ParseAddress parses hex address to IP:port format.
 func ParseAddress(hex string) string {
 	parts := strings.Split(hex, ":")
@@ -415,24 +443,41 @@ func ParseAddress(hex string) string {
 	ip := HexToIP(parts[0])
 	port, _ := strconv.ParseInt(parts[1], 16, 64)
 
-	if ip == "0.0.0.0" || ip == "0:0:0:0:0:0:0:0" {
+	if ip == "0.0.0.0" || ip == "::" {
 		return fmt.Sprintf("*:%d", port)
 	}
 
-	return fmt.Sprintf("%s:%d", ip, port)
+	return net.JoinHostPort(ip, strconv.FormatInt(port, 10))
 }
 
-// HexToIP converts hex string to IP address.
+// HexToIP converts a /proc/net/{tcp,udp}[6] hex address to an IP string.
+// IPv4 addresses are 4 bytes; IPv6 addresses are 16 bytes stored as 4
+// little-endian 32-bit words. In both cases the raw bytes are byte-reversed
+// per 32-bit word relative to a plain big-endian hex decode.
 func HexToIP(hex string) string {
-	if len(hex) == 8 {
-		var parts []string
-		for i := 6; i >= 0; i -= 2 {
-			val, _ := strconv.ParseInt(hex[i:i+2], 16, 64)
-			parts = append(parts, fmt.Sprintf("%d", val))
+	switch len(hex) {
+	case 8:
+		return net.IP(reverseHexWords(hex)).String()
+	case 32:
+		b := make([]byte, 0, 16)
+		for w := 0; w < 4; w++ {
+			b = append(b, reverseHexWords(hex[w*8:w*8+8])...)
 		}
-		return strings.Join(parts, ".")
+		return net.IP(b).String()
 	}
-	return "IPv6"
+	return hex
+}
+
+// reverseHexWords decodes an 8-character (4-byte) hex string and reverses
+// the byte order, matching the little-endian word encoding /proc/net uses
+// for addresses.
+func reverseHexWords(hex string) []byte {
+	b := make([]byte, 4)
+	for i := 0; i < 4; i++ {
+		val, _ := strconv.ParseUint(hex[i*2:i*2+2], 16, 8)
+		b[3-i] = byte(val)
+	}
+	return b
 }
 
 // ParseTCPState parses hex TCP state to string.

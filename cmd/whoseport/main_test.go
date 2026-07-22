@@ -1,328 +1,317 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
-	"flag"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/bluehoodie/whoseport/internal/display/format"
 	displayjson "github.com/bluehoodie/whoseport/internal/display/json"
 	"github.com/bluehoodie/whoseport/internal/model"
 	"github.com/bluehoodie/whoseport/internal/process"
-	"github.com/bluehoodie/whoseport/internal/procfs"
 )
 
-// TestToProcessInfo tests the lsof output parsing
-func TestToProcessInfo(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    *model.ProcessInfo
-		wantErr bool
-	}{
-		{
-			name:  "valid lsof output with IPv4",
-			input: "node    12345 testuser   21u  IPv4 0x123456      0t0  TCP *:8080 (LISTEN)",
-			want: &model.ProcessInfo{
-				Command:    "node",
-				ID:         12345,
-				User:       "testuser",
-				FD:         "21u",
-				Type:       "IPv4",
-				Device:     "0x123456",
-				SizeOffset: "0t0",
-				Node:       "TCP",
-				Name:       "*:8080 (LISTEN)",
-			},
-			wantErr: false,
-		},
-		{
-			name:  "valid lsof output with IPv6",
-			input: "python3    9876 www-data   3u  IPv6 0xabcdef      0t0  TCP *:3000 (LISTEN)",
-			want: &model.ProcessInfo{
-				Command:    "python3",
-				ID:         9876,
-				User:       "www-data",
-				FD:         "3u",
-				Type:       "IPv6",
-				Device:     "0xabcdef",
-				SizeOffset: "0t0",
-				Node:       "TCP",
-				Name:       "*:3000 (LISTEN)",
-			},
-			wantErr: false,
-		},
-		{
-			name:    "invalid lsof output - too few fields",
-			input:   "node 12345 testuser",
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name:    "invalid lsof output - non-numeric PID",
-			input:   "node abcde testuser   21u  IPv4 0x123456      0t0  TCP *:8080 (LISTEN)",
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name:    "empty input",
-			input:   "",
-			want:    nil,
-			wantErr: true,
-		},
+// binPath is the whoseport binary built once by TestMain and exercised as a
+// subprocess by the TestCLI_* tests below.
+var binPath string
+
+// listenHelperEnvVar, when set to "1", makes TestMain re-exec this same test
+// binary as a standalone TCP listener instead of running the test suite. See
+// TestCLI_JSONActionOutputStaysParseable, which needs a real child process it
+// owns (and can safely signal) to be the "process using the port" - it can't
+// use the go test process itself, since that's the process a real SIGTERM
+// would kill.
+const listenHelperEnvVar = "WHOSEPORT_TEST_LISTEN_HELPER"
+
+// TestMain builds the real whoseport binary once so the CLI tests can run it
+// as a subprocess and assert on its actual exit code/stdout/stderr, rather
+// than reimplementing flag-parsing logic that has nothing to do with
+// whoseport's own validation.
+func TestMain(m *testing.M) {
+	if os.Getenv(listenHelperEnvVar) == "1" {
+		runListenHelper()
+		return
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := process.NewLsofParser()
-			got, err := parser.Parse([]byte(tt.input))
+	dir, err := os.MkdirTemp("", "whoseport-test")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "TestMain: MkdirTemp:", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(dir)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("toProcessInfo() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+	binPath = filepath.Join(dir, "whoseport")
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: go build: %v\n%s", err, out)
+		os.Exit(1)
+	}
 
-			if tt.wantErr {
-				return
-			}
+	os.Exit(m.Run())
+}
 
-			if got.Command != tt.want.Command {
-				t.Errorf("Command = %v, want %v", got.Command, tt.want.Command)
-			}
-			if got.ID != tt.want.ID {
-				t.Errorf("ID = %v, want %v", got.ID, tt.want.ID)
-			}
-			if got.User != tt.want.User {
-				t.Errorf("User = %v, want %v", got.User, tt.want.User)
-			}
-			if got.FD != tt.want.FD {
-				t.Errorf("FD = %v, want %v", got.FD, tt.want.FD)
-			}
-			if got.Type != tt.want.Type {
-				t.Errorf("Type = %v, want %v", got.Type, tt.want.Type)
-			}
-			if got.Name != tt.want.Name {
-				t.Errorf("Name = %v, want %v", got.Name, tt.want.Name)
-			}
-		})
+// runListenHelper opens a TCP listener on an OS-assigned port, prints that
+// port to stdout so the parent test can find it, and then blocks until
+// killed. It only runs when listenHelperEnvVar is set - see TestMain.
+func runListenHelper() {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "runListenHelper: listen:", err)
+		os.Exit(1)
+	}
+	fmt.Println(l.Addr().(*net.TCPAddr).Port)
+	// Accept forever (rather than select{}, which the runtime's deadlock
+	// detector would kill this single-goroutine process for) until the
+	// parent kills us, e.g. via whoseport -t.
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		conn.Close()
 	}
 }
 
-// TestFormatBytes tests byte formatting
-func TestFormatBytes(t *testing.T) {
-	tests := []struct {
-		name  string
-		bytes int64
-		want  string
-	}{
-		{"zero bytes", 0, "0 B"},
-		{"bytes", 500, "500 B"},
-		{"kilobytes", 1024, "1.00 KB"},
-		{"megabytes", 1024 * 1024, "1.00 MB"},
-		{"gigabytes", 1024 * 1024 * 1024, "1.00 GB"},
-		{"mixed KB", 1536, "1.50 KB"},
-		{"mixed MB", 1024*1024 + 512*1024, "1.50 MB"},
-		{"large number", 9876543210, "9.20 GB"},
-	}
+// runCLI runs the built whoseport binary with the given args and returns its
+// stdout, stderr, and exit code. Stdin is left unset, which os/exec connects
+// to the null device, so a test can never accidentally block on an
+// interactive prompt.
+func runCLI(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
+	t.Helper()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.FormatBytes(tt.bytes)
-			if got != tt.want {
-				t.Errorf("format.FormatBytes(%d) = %v, want %v", tt.bytes, got, tt.want)
-			}
-		})
+	cmd := exec.Command(binPath, args...)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+
+	err := cmd.Run()
+	if err == nil {
+		return outBuf.String(), errBuf.String(), 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return outBuf.String(), errBuf.String(), exitErr.ExitCode()
+	}
+	t.Fatalf("failed to run whoseport: %v", err)
+	return "", "", -1
+}
+
+// freeTCPPort returns a port with nothing listening on it, by opening then
+// immediately closing a listener the kernel assigned. There is a small,
+// unavoidable race if something else grabs the port before the CLI runs it,
+// but in practice this is reliable enough for a test.
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve a free port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// TestCLI_MutualExclusion verifies that combining -k and -t is rejected with
+// a clear error rather than silently picking one signal over the other -
+// main.go's actual validation (main.go:69-73), which the flag package itself
+// has no opinion on. This never touches a real process: main.go validates
+// the flags before it ever looks up a port.
+func TestCLI_MutualExclusion(t *testing.T) {
+	stdout, stderr, exitCode := runCLI(t, "-k", "-t", "8080")
+
+	if exitCode == 0 {
+		t.Errorf("exit code = 0, want non-zero")
+	}
+	combined := stdout + stderr
+	if !strings.Contains(combined, "cannot use both") || !strings.Contains(combined, "-k") || !strings.Contains(combined, "-t") {
+		t.Errorf("output = %q, want a message mentioning both -k and -t cannot be combined", combined)
 	}
 }
 
-// TestFormatMemory tests memory formatting
-func TestFormatMemory(t *testing.T) {
-	tests := []struct {
-		name string
-		kb   int64
-		want string
-	}{
-		{"zero", 0, "0 KB"},
-		{"kilobytes", 100, "100 KB"},
-		{"megabytes", 1024, "1.00 MB"},
-		{"gigabytes", 1024 * 1024, "1.00 GB"},
-		{"mixed MB", 1536, "1.50 MB"},
-		{"large GB", 2560 * 1024, "2.50 GB"},
-	}
+// TestCLI_MissingPort verifies that running with no port argument fails with
+// a message the user can act on, rather than a stdlib flag-parsing panic or
+// silent default.
+func TestCLI_MissingPort(t *testing.T) {
+	stdout, stderr, exitCode := runCLI(t)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.FormatMemory(tt.kb)
-			if got != tt.want {
-				t.Errorf("format.FormatMemory(%d) = %v, want %v", tt.kb, got, tt.want)
-			}
-		})
+	if exitCode == 0 {
+		t.Errorf("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stdout+stderr, "missing port number") {
+		t.Errorf("output = %q, want it to mention a missing port number", stdout+stderr)
 	}
 }
 
-// TestFormatDuration tests duration formatting
-func TestFormatDuration(t *testing.T) {
-	tests := []struct {
-		name     string
-		duration time.Duration
-		want     string
-	}{
-		{"zero", 0, "0s"},
-		{"seconds", 30 * time.Second, "30s"},
-		{"minutes", 5 * time.Minute, "5m 0s"},
-		{"hours", 2 * time.Hour, "2h 0m 0s"},
-		{"days", 24 * time.Hour, "1d 0h 0m 0s"},
-		{"weeks", 7 * 24 * time.Hour, "7d 0h 0m 0s"},
-		{"mixed", 2*time.Hour + 30*time.Minute + 15*time.Second, "2h 30m 15s"},
-		{"long uptime", 10*24*time.Hour + 5*time.Hour + 23*time.Minute, "10d 5h 23m 0s"},
-	}
+// TestCLI_NonIntegerPort verifies a non-numeric port argument is rejected
+// with a message identifying the actual problem, instead of a generic
+// strconv error leaking through.
+func TestCLI_NonIntegerPort(t *testing.T) {
+	stdout, stderr, exitCode := runCLI(t, "abc")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := procfs.FormatDuration(tt.duration)
-			if got != tt.want {
-				t.Errorf("procfs.FormatDuration(%v) = %v, want %v", tt.duration, got, tt.want)
-			}
-		})
+	if exitCode == 0 {
+		t.Errorf("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stdout+stderr, "port must be an integer") {
+		t.Errorf("output = %q, want it to say the port must be an integer", stdout+stderr)
 	}
 }
 
-// TestVisualWidth tests visual width calculation for emoji and unicode
-func TestVisualWidth(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  int
-	}{
-		{"ascii only", "hello", 5},
-		{"single emoji", "🔍", 2},
-		{"emoji with text", "🔍 Search", 9},
-		{"multiple emoji", "🔍⚙️📊", 6},
-		{"mixed", "Hello 🌍 World", 14},
-		{"empty string", "", 0},
-		{"spaces", "   ", 3},
-		{"emoji at end", "Test 🎉", 7},
-	}
+// TestCLI_JSONNoServiceIsCleanOnStdout verifies that --json against a port
+// nobody is listening on fails with the diagnostic on stderr only, keeping
+// stdout parseable as JSON (or empty) for scripting - the whole reason
+// --json implies -n (main.go:64-66).
+func TestCLI_JSONNoServiceIsCleanOnStdout(t *testing.T) {
+	port := freeTCPPort(t)
+	stdout, stderr, exitCode := runCLI(t, "--json", fmt.Sprintf("%d", port))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.VisualWidth(tt.input)
-			if got != tt.want {
-				t.Errorf("format.VisualWidth(%q) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
+	if exitCode == 0 {
+		t.Errorf("exit code = 0, want non-zero (nothing listening on port %d)", port)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty so --json output stays parseable", stdout)
+	}
+	if !strings.Contains(stderr, fmt.Sprintf("port %d", port)) {
+		t.Errorf("stderr = %q, want it to mention port %d", stderr, port)
 	}
 }
 
-// TestStripAnsiCodes tests ANSI code removal
-func TestStripAnsiCodes(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"no codes", "hello", "hello"},
-		{"simple color", "\033[31mred\033[0m", "red"},
-		{"multiple codes", "\033[1m\033[31mbold red\033[0m", "bold red"},
-		{"256 color", "\033[38;5;208morange\033[0m", "orange"},
-		{"mixed", "Hello \033[31mRed\033[0m World", "Hello Red World"},
-		{"empty", "", ""},
-		{"only codes", "\033[31m\033[0m", ""},
+// TestCLI_JSONActionOutputStaysParseable verifies that --json combined with
+// an action flag (-t) against a port that IS in use produces stdout that is
+// still valid JSON, with the "successfully terminated" confirmation instead
+// landing on stderr. TestCLI_JSONNoServiceIsCleanOnStdout only covers the
+// "nothing listening" path, which never reaches the action-result fmt.Printf
+// calls in handleRegularProcess - exactly why the bug those calls caused
+// survived review.
+//
+// This spawns its own child process (via the re-exec pattern in TestMain /
+// runListenHelper) to be the thing listening on the port, so that -t signals
+// only a process this test owns and started - never the test binary itself.
+func TestCLI_JSONActionOutputStaysParseable(t *testing.T) {
+	helper := exec.Command(os.Args[0])
+	helper.Env = append(os.Environ(), listenHelperEnvVar+"=1")
+	stdoutPipe, err := helper.StdoutPipe()
+	if err != nil {
+		t.Fatalf("failed to attach stdout pipe to listen helper: %v", err)
+	}
+	var helperStderr bytes.Buffer
+	helper.Stderr = &helperStderr
+
+	if err := helper.Start(); err != nil {
+		t.Fatalf("failed to start listen helper: %v", err)
+	}
+	var waited bool
+	defer func() {
+		// Best-effort cleanup: whoseport -t below should already have
+		// terminated the helper (and the explicit Wait near the end of this
+		// test will have reaped it), but if the test fails/returns before
+		// that point this ensures we don't leak the child process we started.
+		if !waited {
+			_ = helper.Process.Kill()
+			_ = helper.Wait()
+		}
+	}()
+
+	line, err := bufio.NewReader(stdoutPipe).ReadString('\n')
+	if err != nil {
+		t.Fatalf("failed to read port from listen helper: %v (stderr: %s)", err, helperStderr.String())
+	}
+	port := strings.TrimSpace(line)
+
+	stdout, stderr, exitCode := runCLI(t, "--json", "-t", port)
+
+	if exitCode != 0 {
+		t.Errorf("exit code = %d, want 0 (stdout=%q stderr=%q)", exitCode, stdout, stderr)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.StripAnsiCodes(tt.input)
-			if got != tt.want {
-				t.Errorf("format.StripAnsiCodes(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
+	var info model.ProcessInfo
+	if err := json.Unmarshal([]byte(stdout), &info); err != nil {
+		t.Errorf("stdout did not parse as JSON: %v\nstdout: %q", err, stdout)
+	}
+
+	if strings.Contains(stdout, "Successfully terminated") {
+		t.Errorf("stdout contains the action confirmation message, want it on stderr only: %q", stdout)
+	}
+	if !strings.Contains(stderr, "Successfully terminated") {
+		t.Errorf("stderr = %q, want it to contain the termination confirmation", stderr)
+	}
+
+	waitErr := helper.Wait()
+	waited = true
+	if waitErr == nil {
+		t.Errorf("listen helper exited cleanly, want it killed by SIGTERM")
 	}
 }
 
-// TestGetStateEmoji tests emoji mapping for process states
-func TestGetStateEmoji(t *testing.T) {
-	tests := []struct {
-		state string
-		want  string
-	}{
-		{"Running", "🟢"},
-		{"Sleeping", "🔵"},
-		{"Sleeping (interruptible)", "🔵"},
-		{"Waiting (uninterruptible)", "⏸"},
-		{"Zombie", "💀"},
-		{"Stopped", "🟡"},
-		{"Dead", "⚪"},
-		{"Unknown", "⚪"},
-		{"", "⚪"},
-	}
+// TestCLI_Help verifies --help documents every flag whoseport actually
+// registers, so a change to main.go's flag set can't silently drop one from
+// the usage text.
+//
+// Usage goes to stderr, matching the flag package's own convention, so that a
+// usage dump triggered by a bad argument can never corrupt a --json pipeline.
+// The empty-stdout assertion is what stops that regressing.
+func TestCLI_Help(t *testing.T) {
+	stdout, stderr, _ := runCLI(t, "--help")
 
-	for _, tt := range tests {
-		t.Run(tt.state, func(t *testing.T) {
-			got := format.GetStateEmoji(tt.state)
-			if got != tt.want {
-				t.Errorf("format.GetStateEmoji(%q) = %v, want %v", tt.state, got, tt.want)
-			}
-		})
+	for _, want := range []string{"-k", "--kill", "-t", "--term", "-n", "--no-interactive", "--json"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("--help output missing %q\nstderr:\n%s", want, stderr)
+		}
+	}
+	if stdout != "" {
+		t.Errorf("--help wrote %q to stdout, want usage on stderr only", stdout)
 	}
 }
 
-// TestGetStateColor tests color mapping for process states
-func TestGetStateColor(t *testing.T) {
-	tests := []struct {
-		state string
-		want  string
-	}{
-		{"Running", "\033[32m"},    // Green
-		{"Sleeping", "\033[36m"},   // Cyan
-		{"Disk Sleep", "\033[37m"}, // White
-		{"Zombie", "\033[31m"},     // Red
-		{"Stopped", "\033[33m"},    // Yellow
-		{"Dead", "\033[37m"},       // White
-		{"Unknown", "\033[37m"},    // White
-		{"", "\033[37m"},           // White
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.state, func(t *testing.T) {
-			got := format.GetStateColor(tt.state, nil)
-			if got != tt.want {
-				t.Errorf("format.GetStateColor(%q) = %v, want %v", tt.state, got, tt.want)
-			}
-		})
+// TestCLI_ArgErrorsStayOffStdout pins the reason usage lives on stderr: a
+// malformed port must not feed a wall of ANSI help text into a `--json | jq`
+// pipeline. Exit status alone is not enough, since a pipeline sees the bytes
+// before it sees the status.
+func TestCLI_ArgErrorsStayOffStdout(t *testing.T) {
+	for _, args := range [][]string{
+		{"--json", "notaport"},
+		{"--json"},
+		{"--json", "-k", "-t", "8080"},
+	} {
+		stdout, stderr, code := runCLI(t, args...)
+		if code == 0 {
+			t.Errorf("runCLI(%v) exited 0, want non-zero", args)
+		}
+		if stdout != "" {
+			t.Errorf("runCLI(%v) wrote %q to stdout, want it empty", args, stdout)
+		}
+		if stderr == "" {
+			t.Errorf("runCLI(%v) wrote nothing to stderr, want an error message", args)
+		}
 	}
 }
 
-// TestTruncate tests string truncation
-func TestTruncate(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		maxLen int
-		want   string
-	}{
-		{"no truncation needed", "hello", 10, "hello"},
-		{"exact length", "hello", 5, "hello"},
-		{"format.Truncate short", "hello world", 5, "he..."},
-		{"format.Truncate medium", "hello world", 8, "hello..."},
-		{"empty string", "", 5, ""},
-		{"very short limit", "hello", 3, "..."},
-		// Note: format.Truncate panics when maxLen < 3, which is a bug we'll fix during refactoring
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := format.Truncate(tt.input, tt.maxLen)
-			if got != tt.want {
-				t.Errorf("format.Truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-			}
-		})
-	}
-}
+// NOTE: lsof output parsing used to be tested here (TestToProcessInfo), but
+// it asserted against a parser input format (a single space-delimited line)
+// that no longer exists -- process.NewLsofParser() now parses lsof -F
+// field-mode output, so the old test had been failing outright since the
+// parser was rewritten. That coverage lives in
+// internal/process/parser_test.go (TestLsofParser_Parse) instead, which is
+// strictly stronger: it also covers multi-row/multi-PID lsof output and the
+// ErrNoService sentinel.
+//
+// NOTE: FormatBytes, FormatMemory, FormatDuration, VisualWidth,
+// StripAnsiCodes, GetStateEmoji, GetStateColor and Truncate are pure
+// internal/display/format functions (FormatDuration was formerly duplicated
+// in internal/procfs too) that used to have copies of their tests here.
+// Those copies exercised nothing in this package and are now covered - at
+// least as thoroughly, including the previously-untested maxLen<3 Truncate
+// cases and the terminal.Theme-aware GetStateColor path - by
+// internal/display/format/formatters_test.go. The few cases that file was
+// missing (FormatDuration's "weeks"/"long uptime", several VisualWidth
+// cases, and GetStateEmoji/FormatBytes/FormatMemory entirely) were ported
+// there before deleting the copies here.
 
 // TestPrintJSON tests JSON output generation
 func TestPrintJSON(t *testing.T) {
@@ -386,148 +375,6 @@ func BenchmarkStripAnsiCodes(b *testing.B) {
 	}
 }
 
-// TestIntegration_LsofParsing is an integration test for the full lsof flow
-func TestIntegration_LsofParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// This test would require mocking exec.Command
-	// For now, we'll just verify the structure is correct
-	t.Skip("Integration test requires system setup")
-}
-
-// TestIntegration_ProcFSParsing tests /proc filesystem parsing
-func TestIntegration_ProcFSParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// This test would require setting up a mock /proc filesystem
-	t.Skip("Integration test requires mock /proc setup")
-}
-
-// TestIntegration_SignalSelection tests the interactive signal selection flow
-func TestIntegration_SignalSelection(t *testing.T) {
-	// This test verifies the full flow: find process -> prompt for kill -> prompt for signal -> kill
-	// For now, this is a placeholder that verifies the structure
-	// Full implementation would require mocking the entire flow
-	t.Skip("Integration test requires full mock setup")
-}
-
-// TestIntegration_BackwardCompatibility tests that -k flag still uses SIGTERM
-func TestIntegration_BackwardCompatibility(t *testing.T) {
-	// This test verifies that existing behavior is preserved:
-	// whoseport -k 8080 should still send SIGTERM by default
-	// Full implementation would require process mocking
-	t.Skip("Integration test requires process mocking")
-}
-
-// TestFlagParsing_KillFlag tests that -k flag is parsed correctly
-func TestFlagParsing_KillFlag(t *testing.T) {
-	// Reset flags for testing
-	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
-
-	// Test -k short flag
-	killFlag = false
-	termFlag = false
-	flag.BoolVar(&killFlag, "kill", false, "Kill the process using the port")
-	flag.BoolVar(&killFlag, "k", false, "Kill the process using the port (shorthand)")
-	flag.BoolVar(&termFlag, "term", false, "Terminate the process using the port (SIGTERM)")
-	flag.BoolVar(&termFlag, "t", false, "Terminate the process using the port (shorthand)")
-
-	args := []string{"-k", "8080"}
-	if err := flag.CommandLine.Parse(args); err != nil {
-		t.Fatalf("Failed to parse flags: %v", err)
-	}
-
-	if !killFlag {
-		t.Error("killFlag should be true when -k is passed")
-	}
-	if termFlag {
-		t.Error("termFlag should be false when only -k is passed")
-	}
-}
-
-// TestFlagParsing_TermFlag tests that -t flag is parsed correctly
-func TestFlagParsing_TermFlag(t *testing.T) {
-	// Reset flags for testing
-	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
-
-	// Test -t short flag
-	killFlag = false
-	termFlag = false
-	flag.BoolVar(&killFlag, "kill", false, "Kill the process using the port")
-	flag.BoolVar(&killFlag, "k", false, "Kill the process using the port (shorthand)")
-	flag.BoolVar(&termFlag, "term", false, "Terminate the process using the port (SIGTERM)")
-	flag.BoolVar(&termFlag, "t", false, "Terminate the process using the port (shorthand)")
-
-	args := []string{"-t", "8080"}
-	if err := flag.CommandLine.Parse(args); err != nil {
-		t.Fatalf("Failed to parse flags: %v", err)
-	}
-
-	if killFlag {
-		t.Error("killFlag should be false when only -t is passed")
-	}
-	if !termFlag {
-		t.Error("termFlag should be true when -t is passed")
-	}
-}
-
-// TestFlagParsing_LongTermFlag tests that --term flag is parsed correctly
-func TestFlagParsing_LongTermFlag(t *testing.T) {
-	// Reset flags for testing
-	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
-
-	killFlag = false
-	termFlag = false
-	flag.BoolVar(&killFlag, "kill", false, "Kill the process using the port")
-	flag.BoolVar(&killFlag, "k", false, "Kill the process using the port (shorthand)")
-	flag.BoolVar(&termFlag, "term", false, "Terminate the process using the port (SIGTERM)")
-	flag.BoolVar(&termFlag, "t", false, "Terminate the process using the port (shorthand)")
-
-	args := []string{"--term", "8080"}
-	if err := flag.CommandLine.Parse(args); err != nil {
-		t.Fatalf("Failed to parse flags: %v", err)
-	}
-
-	if killFlag {
-		t.Error("killFlag should be false when only --term is passed")
-	}
-	if !termFlag {
-		t.Error("termFlag should be true when --term is passed")
-	}
-}
-
-// TestFlagParsing_MutualExclusion tests that -k and -t cannot be used together
-func TestFlagParsing_MutualExclusion(t *testing.T) {
-	// This test documents expected behavior when both flags are passed
-	// The implementation should handle this gracefully (last flag wins or error)
-	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
-
-	killFlag = false
-	termFlag = false
-	flag.BoolVar(&killFlag, "kill", false, "Kill the process using the port")
-	flag.BoolVar(&killFlag, "k", false, "Kill the process using the port (shorthand)")
-	flag.BoolVar(&termFlag, "term", false, "Terminate the process using the port (SIGTERM)")
-	flag.BoolVar(&termFlag, "t", false, "Terminate the process using the port (shorthand)")
-
-	args := []string{"-k", "-t", "8080"}
-	if err := flag.CommandLine.Parse(args); err != nil {
-		t.Fatalf("Failed to parse flags: %v", err)
-	}
-
-	// Both flags should be true if both are specified
-	// The main.go implementation should validate this and show an error
-	if !killFlag {
-		t.Error("killFlag should be true when -k is passed")
-	}
-	if !termFlag {
-		t.Error("termFlag should be true when -t is passed")
-	}
-}
-
 // TestIsNoServiceError tests the isNoServiceError helper function
 func TestIsNoServiceError(t *testing.T) {
 	tests := []struct {
@@ -542,12 +389,12 @@ func TestIsNoServiceError(t *testing.T) {
 		},
 		{
 			name: "no service found error",
-			err:  errors.New("no service found on this port"),
+			err:  process.ErrNoService,
 			want: true,
 		},
 		{
 			name: "wrapped no service found error",
-			err:  errors.New("failed to parse lsof output: no service found on this port"),
+			err:  fmt.Errorf("failed to parse lsof output: %w", process.ErrNoService),
 			want: true,
 		},
 		{

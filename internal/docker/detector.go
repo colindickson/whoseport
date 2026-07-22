@@ -2,63 +2,100 @@ package docker
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
 
-// Detector identifies if a process is related to a Docker container.
-type Detector interface {
-	// IsDockerRelated checks if the given process is Docker-related
-	// Returns true and container ID if it's a Docker container process
-	// port parameter is used to find containers by port mapping (useful for Docker Desktop on macOS)
-	IsDockerRelated(info *model.ProcessInfo, port int) (bool, string, error)
+// dockerProbeTimeout bounds how long we wait for a wedged or unreachable Docker daemon
+// before giving up on Docker detection entirely.
+const dockerProbeTimeout = 2 * time.Second
+
+// containerIPPattern extracts the -container-ip argument from a docker-proxy command line.
+var containerIPPattern = regexp.MustCompile(`-container-ip\s+([0-9.]+)`)
+
+// dockerCgroupPattern extracts a container ID from a /proc/<pid>/cgroup path. Docker cgroup
+// paths typically look like:
+//
+//	12:memory:/docker/8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f
+//
+// or
+//
+//	12:memory:/system.slice/docker-8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f.scope
+var dockerCgroupPattern = regexp.MustCompile(`/docker[/-]([a-f0-9]{64})`)
+
+// dockerPortHandlerNames are the known executable names of processes that own a host
+// port on behalf of a Docker container (as opposed to any process whose command line
+// merely mentions "docker", e.g. one launched from a path containing that word).
+var dockerPortHandlerNames = map[string]bool{
+	"docker-proxy":             true, // Linux: forwards a published port to the container
+	"com.docker.backend":       true, // macOS: Docker Desktop's port-handling process
+	"docker":                   true,
+	"rootlesskit":              true, // Linux rootless (default "builtin" port driver): binds the host port itself
+	"rootlesskit-docker-proxy": true, // Linux rootless ("docker-proxy" port driver): child process rootlesskit spawns to bind the host port
+	"slirp4netns":              true, // Linux rootless ("slirp4netns" port driver): child process that binds the host port
+}
+
+// isDockerPortHandler reports whether command is one of the known Docker binaries that
+// bind host ports for containers.
+func isDockerPortHandler(command string) bool {
+	name := strings.ToLower(filepath.Base(command))
+	return dockerPortHandlerNames[name]
 }
 
 // DefaultDetector implements Docker detection logic.
 type DefaultDetector struct {
-	dockerAvailable bool
+	availableOnce sync.Once
+	available     bool
 }
 
 // NewDetector creates a new Docker detector.
-func NewDetector() Detector {
-	detector := &DefaultDetector{}
-	detector.checkDockerAvailability()
-	return detector
+func NewDetector() *DefaultDetector {
+	return &DefaultDetector{}
 }
 
-// checkDockerAvailability verifies if Docker CLI is available.
-func (d *DefaultDetector) checkDockerAvailability() {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
-	err := cmd.Run()
-	d.dockerAvailable = err == nil
+// dockerAvailable reports whether the Docker CLI can reach a daemon. The check is only
+// performed the first time it's needed (a strategy is about to shell out to docker), and
+// the result is cached for the lifetime of the detector. A short timeout keeps a wedged
+// or unreachable daemon from hanging every whoseport invocation.
+func (d *DefaultDetector) dockerAvailable() bool {
+	d.availableOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), dockerProbeTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+		d.available = cmd.Run() == nil
+	})
+	return d.available
 }
 
 // IsDockerRelated determines if a process is Docker-related and returns the container ID.
 func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bool, string, error) {
-	if !d.dockerAvailable {
-		return false, "", nil
-	}
-
-	// Strategy 1: If process name contains "docker", query Docker for containers using this port
-	// This works on both Linux and macOS (including Docker Desktop where com.docker.backend handles ports)
-	if strings.Contains(strings.ToLower(info.Command), "docker") ||
-		strings.Contains(strings.ToLower(info.FullCommand), "docker") {
+	// Strategy 1: If the process is a known Docker port-handling binary, query Docker for
+	// containers using this port. This works on both Linux and macOS (including Docker
+	// Desktop where com.docker.backend handles ports).
+	if isDockerPortHandler(info.Command) && d.dockerAvailable() {
 		containerID := d.findContainerByPort(port)
 		if containerID != "" {
 			return true, containerID, nil
 		}
 	}
 
-	// Strategy 2: Check if the process is docker-proxy (Linux)
-	// docker-proxy is the process that forwards ports from host to container
-	if strings.Contains(info.Command, "docker-proxy") {
+	// Strategy 2: Check if the process is a known Docker port-handling binary (Linux)
+	// and try to resolve its container via the -container-ip argument some of these
+	// binaries (e.g. docker-proxy) expose. Uses the same exact-basename allowlist as
+	// Strategy 1 rather than a substring match, so a binary merely named like
+	// "docker-proxy" cannot be misidentified.
+	if isDockerPortHandler(info.Command) && d.dockerAvailable() {
 		containerID := d.findContainerFromDockerProxy(info)
 		if containerID != "" {
 			return true, containerID, nil
@@ -67,12 +104,6 @@ func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bo
 
 	// Strategy 3: Check if the process is running inside a container via cgroup (Linux)
 	containerID, err := d.checkCgroupForContainer(info.ID)
-	if err == nil && containerID != "" {
-		return true, containerID, nil
-	}
-
-	// Strategy 4: Try to find container by scanning /proc/{pid}/environ for Docker env vars (Linux)
-	containerID, err = d.checkEnvironForContainer(info.ID)
 	if err == nil && containerID != "" {
 		return true, containerID, nil
 	}
@@ -116,7 +147,9 @@ func (d *DefaultDetector) findContainerByPort(port int) string {
 	return ""
 }
 
-// containerHasPort checks if the ports string contains a mapping from the given host port.
+// containerHasPort checks if the ports string contains a TCP mapping from the given host port.
+// whoseport only ever looks for TCP listeners (lsof is filtered to LISTEN state), so a container
+// publishing the same port number over UDP must not be treated as a match.
 func (d *DefaultDetector) containerHasPort(portsStr string, port int) bool {
 	portStr := strconv.Itoa(port)
 
@@ -130,14 +163,19 @@ func (d *DefaultDetector) containerHasPort(portsStr string, port int) bool {
 		// "0.0.0.0:8080->80/tcp"
 		// ":::8080->80/tcp"
 		// "*:8080->80/tcp"
+		// "8080->80/tcp"
 
-		// Extract host port (the part before ->)
-		parts := strings.Split(mapping, "->")
-		if len(parts) < 1 {
+		// Split into host part and "containerPort/proto" (the part after ->)
+		hostPart, containerPart, ok := strings.Cut(mapping, "->")
+		if !ok {
 			continue
 		}
 
-		hostPart := parts[0]
+		// Only TCP mappings are relevant.
+		_, proto, ok := strings.Cut(containerPart, "/")
+		if !ok || !strings.EqualFold(proto, "tcp") {
+			continue
+		}
 
 		// Host part can be:
 		// "0.0.0.0:8080"
@@ -146,12 +184,13 @@ func (d *DefaultDetector) containerHasPort(portsStr string, port int) bool {
 		// "8080"
 
 		// Extract port from host part
-		lastColon := strings.LastIndex(hostPart, ":")
-		if lastColon != -1 {
-			hostPort := hostPart[lastColon+1:]
-			if hostPort == portStr {
-				return true
-			}
+		hostPort := hostPart
+		if lastColon := strings.LastIndex(hostPart, ":"); lastColon != -1 {
+			hostPort = hostPart[lastColon+1:]
+		}
+
+		if hostPort == portStr {
+			return true
 		}
 	}
 
@@ -178,8 +217,7 @@ func (d *DefaultDetector) extractContainerIPFromProxy(info *model.ProcessInfo) s
 	cmdline := info.FullCommand
 
 	// Look for -container-ip argument
-	re := regexp.MustCompile(`-container-ip\s+([0-9.]+)`)
-	matches := re.FindStringSubmatch(cmdline)
+	matches := containerIPPattern.FindStringSubmatch(cmdline)
 	if len(matches) >= 2 {
 		return matches[1]
 	}
@@ -242,57 +280,14 @@ func (d *DefaultDetector) checkCgroupForContainer(pid int) (string, error) {
 	}
 	defer file.Close()
 
-	// Pattern for extracting container ID from cgroup paths
-	// Docker cgroup paths typically look like:
-	// 12:memory:/docker/8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f
-	// or
-	// 12:memory:/system.slice/docker-8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f.scope
-	dockerPattern := regexp.MustCompile(`/docker[/-]([a-f0-9]{64})`)
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		matches := dockerPattern.FindStringSubmatch(line)
+		matches := dockerCgroupPattern.FindStringSubmatch(line)
 		if len(matches) >= 2 {
 			return matches[1], nil
 		}
 	}
 
 	return "", scanner.Err()
-}
-
-// checkEnvironForContainer checks process environment variables for Docker-specific vars.
-func (d *DefaultDetector) checkEnvironForContainer(pid int) (string, error) {
-	environFile := fmt.Sprintf("/proc/%d/environ", pid)
-	data, err := os.ReadFile(environFile)
-	if err != nil {
-		return "", err
-	}
-
-	// Environment variables are null-separated
-	envVars := strings.Split(string(data), "\x00")
-
-	// Look for HOSTNAME which in Docker containers is usually the short container ID
-	// or other Docker-specific environment variables
-	var hostname string
-	for _, env := range envVars {
-		if strings.HasPrefix(env, "HOSTNAME=") {
-			hostname = strings.TrimPrefix(env, "HOSTNAME=")
-			break
-		}
-	}
-
-	if hostname == "" {
-		return "", nil
-	}
-
-	// Try to find a container with matching hostname (short ID)
-	cmd := exec.Command("docker", "ps", "-q", "--filter", fmt.Sprintf("id=%s", hostname))
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-
-	containerID := strings.TrimSpace(string(output))
-	return containerID, nil
 }

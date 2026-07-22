@@ -19,7 +19,7 @@ type Displayer struct {
 func NewDisplayer() *Displayer {
 	return &Displayer{
 		theme: terminal.DefaultTheme(),
-		width: 90,
+		width: terminal.Width(),
 	}
 }
 
@@ -32,7 +32,7 @@ func (d *Displayer) Display(info *model.ProcessInfo, port int) {
 	d.printModernSection("⚙️  PROCESS IDENTITY")
 	d.printEnhancedField("Command", info.Command, terminal.ColorBrightGreen, "")
 	d.printEnhancedField("Full Command", format.Truncate(info.FullCommand, 60), terminal.ColorLime, "")
-	d.printEnhancedField("Process ID", fmt.Sprintf("%d", info.ID), terminal.ColorOrange, "PID")
+	d.printEnhancedField("Process ID", fmt.Sprintf("%d", info.ID), terminal.ColorOrange, "")
 	d.printEnhancedField("Parent PID", fmt.Sprintf("%d", info.PPid), terminal.ColorPeach, "")
 	if info.ParentCommand != "" {
 		d.printEnhancedField("Parent Process", info.ParentCommand, terminal.ColorLavender, "")
@@ -50,7 +50,9 @@ func (d *Displayer) Display(info *model.ProcessInfo, port int) {
 		if info.ExeSize > 0 {
 			d.printEnhancedField("Binary Size", format.FormatBytes(info.ExeSize), terminal.ColorTeal, "")
 		}
-		d.printEnhancedField("Environment Vars", fmt.Sprintf("%d", info.EnvCount), terminal.ColorLavender, "")
+		if info.EnvCount > 0 {
+			d.printEnhancedField("Environment Vars", fmt.Sprintf("%d", info.EnvCount), terminal.ColorLavender, "")
+		}
 		if info.WorkingDir != "" {
 			d.printEnhancedField("Working Directory", info.WorkingDir, terminal.ColorSkyBlue, "")
 		}
@@ -81,14 +83,10 @@ func (d *Displayer) Display(info *model.ProcessInfo, port int) {
 	// Section 4: Memory Usage
 	d.printModernSection("💾 MEMORY USAGE")
 	if info.MemoryRSS > 0 {
-		rssBar := d.createMemoryBar(info.MemoryRSS, info.MemoryVMS, 30)
 		d.printEnhancedField("Resident Set (RSS)", format.FormatMemory(info.MemoryRSS), terminal.ColorLime, "")
-		fmt.Printf("  %s%s%s\n", terminal.ColorLime, rssBar, terminal.ColorReset)
 	}
 	if info.MemoryVMS > 0 {
-		vmsBar := d.createMemoryBar(info.MemoryVMS, info.MemoryVMS*2, 30)
 		d.printEnhancedField("Virtual Memory", format.FormatMemory(info.MemoryVMS), terminal.ColorSkyBlue, "")
-		fmt.Printf("  %s%s%s\n", terminal.ColorSkyBlue, vmsBar, terminal.ColorReset)
 	}
 	if info.MemoryLimit > 0 {
 		d.printEnhancedField("Memory Limit", format.FormatMemory(info.MemoryLimit), terminal.ColorDim, "")
@@ -233,30 +231,6 @@ func (d *Displayer) createProgressBar(percent float64, width int) string {
 		terminal.ColorDim,
 		barColor, strings.Repeat("█", filled)+strings.Repeat("░", empty),
 		terminal.ColorDim,
-		terminal.ColorReset)
-
-	return bar
-}
-
-func (d *Displayer) createMemoryBar(used int64, total int64, width int) string {
-	if total == 0 {
-		total = used
-	}
-	percent := float64(used) / float64(total) * 100.0
-	if percent > 100 {
-		percent = 100
-	}
-
-	filled := int(float64(width) * percent / 100.0)
-	if filled > width {
-		filled = width
-	}
-
-	empty := width - filled
-
-	bar := fmt.Sprintf("[%s%s%s]",
-		strings.Repeat("▓", filled),
-		strings.Repeat("░", empty),
 		terminal.ColorReset)
 
 	return bar

@@ -3,13 +3,13 @@
 package procfs
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bluehoodie/whoseport/internal/display/format"
 	"github.com/bluehoodie/whoseport/internal/model"
 )
 
@@ -71,15 +71,12 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	cmd = exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
 	if output, err := cmd.Output(); err == nil {
 		comm := strings.TrimSpace(string(output))
-		// Try to find the full path
+		// ps -o comm= on macOS normally already returns an absolute path.
+		// If it doesn't, leave ExePath empty rather than guessing at a
+		// path via the caller's own $PATH, which can resolve to a
+		// completely different binary than the one actually running.
 		if strings.HasPrefix(comm, "/") {
 			info.ExePath = comm
-		} else {
-			// Try to resolve using which
-			whichCmd := exec.Command("which", comm)
-			if whichOutput, err := whichCmd.Output(); err == nil {
-				info.ExePath = strings.TrimSpace(string(whichOutput))
-			}
 		}
 
 		// Get executable size if we have a path
@@ -93,7 +90,7 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	// Count open file descriptors using lsof
 	cmd = exec.Command("lsof", "-p", strconv.Itoa(pid))
 	if output, err := cmd.Output(); err == nil {
-		lines := strings.Split(string(output), "\n")
+		lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
 		// Subtract 1 for header line
 		if len(lines) > 1 {
 			info.OpenFDs = len(lines) - 1
@@ -112,22 +109,13 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 		}
 	}
 
-	// Count environment variables
-	cmd = exec.Command("ps", "-p", strconv.Itoa(pid), "-E")
-	if output, err := cmd.Output(); err == nil {
-		lines := strings.Split(string(output), "\n")
-		// First line is header, second line is the process, rest are env vars
-		if len(lines) > 2 {
-			// Count non-empty lines after the process line
-			count := 0
-			for i := 2; i < len(lines); i++ {
-				if strings.TrimSpace(lines[i]) != "" {
-					count++
-				}
-			}
-			info.EnvCount = count
-		}
-	}
+	// ponytail: EnvCount is left at 0 on macOS. `ps -E`/`ps e` puts the
+	// environment on the process's own single line (not one var per line
+	// as this code used to assume), and on modern macOS (verified on
+	// 26.2/Tahoe) it prints no environment at all, even for the caller's
+	// own child processes - SIP blocks it. If a real need for this shows
+	// up, look at proc_pidpath-style APIs via cgo; not worth it for a
+	// decorative field.
 
 	// Count child processes
 	cmd = exec.Command("pgrep", "-P", strconv.Itoa(pid))
@@ -138,9 +126,8 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 		}
 	}
 
-	// Get network connections using lsof
-	info.TCPConns = getNetworkConnectionsLsof(pid, "TCP")
-	info.UDPConns = getNetworkConnectionsLsof(pid, "UDP")
+	// Get network connections using lsof (single call, split by protocol)
+	info.TCPConns, info.UDPConns = getNetworkConnectionsLsof(pid)
 	info.NetworkConns = len(info.TCPConns) + len(info.UDPConns)
 
 	// Note: macOS doesn't easily provide IO statistics without specialized APIs
@@ -220,7 +207,7 @@ func parsePsOutput(output string, info *model.ProcessInfo) {
 	pid := info.ID
 	cmd := exec.Command("ps", "-M", "-p", strconv.Itoa(pid))
 	if output, err := cmd.Output(); err == nil {
-		lines := strings.Split(string(output), "\n")
+		lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
 		// Count lines minus header
 		if len(lines) > 1 {
 			info.Threads = len(lines) - 1
@@ -249,7 +236,7 @@ func parseCPUTime(timeStr string) float64 {
 func parseElapsedTime(etime string) string {
 	// Format: [[DD-]HH:]MM:SS
 	duration := parseElapsedDuration(etime)
-	return FormatDuration(duration)
+	return format.FormatDuration(duration)
 }
 
 func parseElapsedDuration(etime string) time.Duration {
@@ -278,9 +265,7 @@ func parseElapsedDuration(etime string) time.Duration {
 	return time.Duration(totalSeconds) * time.Second
 }
 
-func getNetworkConnectionsLsof(pid int, protocol string) []string {
-	var connections []string
-
+func getNetworkConnectionsLsof(pid int) (tcpConns, udpConns []string) {
 	// -a: AND the selection criteria (internet files AND this PID)
 	// -i: internet files
 	// -n: no hostname resolution
@@ -289,10 +274,17 @@ func getNetworkConnectionsLsof(pid int, protocol string) []string {
 	cmd := exec.Command("lsof", "-a", "-i", "-n", "-P", "-p", strconv.Itoa(pid))
 	output, err := cmd.Output()
 	if err != nil {
-		return connections
+		return nil, nil
 	}
 
-	lines := strings.Split(string(output), "\n")
+	return parseNetworkConnections(string(output))
+}
+
+// parseNetworkConnections splits a single `lsof -a -i -n -P -p PID` output
+// into TCP and UDP connection strings, so both protocols come from one
+// subprocess call instead of two identical ones.
+func parseNetworkConnections(output string) (tcpConns, udpConns []string) {
+	lines := strings.Split(output, "\n")
 	for i, line := range lines {
 		if i == 0 || strings.TrimSpace(line) == "" {
 			continue // Skip header
@@ -303,11 +295,6 @@ func getNetworkConnectionsLsof(pid int, protocol string) []string {
 			continue
 		}
 
-		// Check if this is the right protocol
-		if !strings.HasPrefix(fields[7], protocol) {
-			continue
-		}
-
 		// fields[8] contains the connection info (e.g., "localhost:8080->localhost:52242 (ESTABLISHED)")
 		connInfo := fields[8]
 		if len(fields) > 9 {
@@ -315,10 +302,15 @@ func getNetworkConnectionsLsof(pid int, protocol string) []string {
 			connInfo += " " + strings.Join(fields[9:], " ")
 		}
 
-		connections = append(connections, connInfo)
+		switch {
+		case strings.HasPrefix(fields[7], "TCP"):
+			tcpConns = append(tcpConns, connInfo)
+		case strings.HasPrefix(fields[7], "UDP"):
+			udpConns = append(udpConns, connInfo)
+		}
 	}
 
-	return connections
+	return tcpConns, udpConns
 }
 
 // ExpandState expands process state code to human-readable string (macOS version).
@@ -370,26 +362,4 @@ func ExpandState(state string) string {
 		return expanded
 	}
 	return state
-}
-
-// FormatDuration formats a duration to human-readable string.
-func FormatDuration(d time.Duration) string {
-	days := int(d.Hours() / 24)
-	hours := int(d.Hours()) % 24
-	minutes := int(d.Minutes()) % 60
-	seconds := int(d.Seconds()) % 60
-
-	parts := []string{}
-	if days > 0 {
-		parts = append(parts, fmt.Sprintf("%dd", days))
-	}
-	if hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%dh", hours))
-	}
-	if minutes > 0 || hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%dm", minutes))
-	}
-	parts = append(parts, fmt.Sprintf("%ds", seconds))
-
-	return strings.Join(parts, " ")
 }

@@ -1,14 +1,20 @@
 package docker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/bluehoodie/whoseport/internal/model"
 )
+
+// statsTimeout bounds how long `docker stats` may run so a wedged daemon
+// can't hang the CLI.
+const statsTimeout = 5 * time.Second
 
 // Retriever retrieves detailed Docker container information.
 type Retriever interface {
@@ -20,7 +26,7 @@ type Retriever interface {
 type DefaultRetriever struct{}
 
 // NewRetriever creates a new Docker container retriever.
-func NewRetriever() Retriever {
+func NewRetriever() *DefaultRetriever {
 	return &DefaultRetriever{}
 }
 
@@ -50,6 +56,51 @@ func (r *DefaultRetriever) GetContainerInfo(containerID string, processInfo *mod
 	return info, nil
 }
 
+// inspectData mirrors the subset of `docker inspect` JSON output that whoseport uses.
+type inspectData struct {
+	Name    string `json:"Name"`
+	Created string `json:"Created"`
+	Image   string `json:"Image"`
+	Config  struct {
+		Image  string            `json:"Image"`
+		Cmd    []string          `json:"Cmd"`
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
+	State struct {
+		Status    string `json:"Status"`
+		StartedAt string `json:"StartedAt"`
+	} `json:"State"`
+	HostConfig struct {
+		RestartPolicy struct {
+			Name string `json:"Name"`
+		} `json:"RestartPolicy"`
+	} `json:"HostConfig"`
+	NetworkSettings struct {
+		Ports    map[string][]inspectPortBinding `json:"Ports"`
+		Networks map[string]inspectNetwork       `json:"Networks"`
+	} `json:"NetworkSettings"`
+	Mounts   []inspectMount `json:"Mounts"`
+	Platform string         `json:"Platform"`
+}
+
+type inspectPortBinding struct {
+	HostIp   string `json:"HostIp"`
+	HostPort string `json:"HostPort"`
+}
+
+type inspectNetwork struct {
+	IPAddress  string `json:"IPAddress"`
+	Gateway    string `json:"Gateway"`
+	MacAddress string `json:"MacAddress"`
+}
+
+type inspectMount struct {
+	Type        string `json:"Type"`
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
+	RW          bool   `json:"RW"`
+}
+
 // populateInspectData uses docker inspect to get container details.
 func (r *DefaultRetriever) populateInspectData(info *ContainerInfo) error {
 	cmd := exec.Command("docker", "inspect", info.ID)
@@ -58,151 +109,86 @@ func (r *DefaultRetriever) populateInspectData(info *ContainerInfo) error {
 		return err
 	}
 
-	// Parse JSON output
-	var inspectData []map[string]interface{}
-	if err := json.Unmarshal(output, &inspectData); err != nil {
+	return r.parseInspectOutput(info, output)
+}
+
+// parseInspectOutput decodes the JSON produced by `docker inspect` into info.
+// Split out from populateInspectData so it can be tested without shelling out.
+func (r *DefaultRetriever) parseInspectOutput(info *ContainerInfo, output []byte) error {
+	var inspected []inspectData
+	if err := json.Unmarshal(output, &inspected); err != nil {
 		return err
 	}
 
-	if len(inspectData) == 0 {
+	if len(inspected) == 0 {
 		return fmt.Errorf("no inspect data returned")
 	}
 
-	data := inspectData[0]
+	data := inspected[0]
 
-	// Extract basic information
-	if name, ok := data["Name"].(string); ok {
-		info.Name = strings.TrimPrefix(name, "/")
+	info.Name = strings.TrimPrefix(data.Name, "/")
+	info.Image = data.Config.Image
+	info.Command = strings.Join(data.Config.Cmd, " ")
+	info.Labels = data.Config.Labels
+
+	info.State = data.State.Status
+	info.Status = data.State.Status
+	info.CreatedAt = data.Created
+	if t, err := time.Parse(time.RFC3339Nano, data.State.StartedAt); err == nil {
+		info.RunningFor = formatDuration(time.Since(t))
 	}
 
-	// Config section
-	if config, ok := data["Config"].(map[string]interface{}); ok {
-		if image, ok := config["Image"].(string); ok {
-			info.Image = image
-		}
-		if cmd, ok := config["Cmd"].([]interface{}); ok {
-			cmdParts := make([]string, 0, len(cmd))
-			for _, part := range cmd {
-				if s, ok := part.(string); ok {
-					cmdParts = append(cmdParts, s)
-				}
-			}
-			info.Command = strings.Join(cmdParts, " ")
-		}
-		if labels, ok := config["Labels"].(map[string]interface{}); ok {
-			info.Labels = make(map[string]string)
-			for k, v := range labels {
-				if s, ok := v.(string); ok {
-					info.Labels[k] = s
-				}
-			}
-		}
+	info.ImageID = data.Image
+	if len(info.ImageID) > 19 && strings.HasPrefix(info.ImageID, "sha256:") {
+		info.ImageID = info.ImageID[7:19] // Short hash
 	}
 
-	// State section
-	if state, ok := data["State"].(map[string]interface{}); ok {
-		if status, ok := state["Status"].(string); ok {
-			info.State = status
-			info.Status = status
-		}
-		if startedAt, ok := state["StartedAt"].(string); ok {
-			info.CreatedAt = startedAt
-			// Calculate running duration
-			if t, err := time.Parse(time.RFC3339Nano, startedAt); err == nil {
-				duration := time.Since(t)
-				info.RunningFor = formatDuration(duration)
-			}
-		}
+	info.RestartPolicy = data.HostConfig.RestartPolicy.Name
+
+	info.Ports = r.parsePortMappings(data.NetworkSettings.Ports)
+	info.PortString = r.formatPortString(info.Ports)
+
+	// Network iteration order from a Go map is random; sort names so the
+	// reported "primary" network (and its IP/gateway/MAC) is deterministic.
+	netNames := make([]string, 0, len(data.NetworkSettings.Networks))
+	for name := range data.NetworkSettings.Networks {
+		netNames = append(netNames, name)
+	}
+	sort.Strings(netNames)
+	info.Networks = netNames
+	if len(netNames) > 0 {
+		primary := data.NetworkSettings.Networks[netNames[0]]
+		info.IPAddress = primary.IPAddress
+		info.Gateway = primary.Gateway
+		info.MacAddress = primary.MacAddress
 	}
 
-	// Image ID
-	if imageID, ok := data["Image"].(string); ok {
-		info.ImageID = imageID
-		if len(imageID) > 19 && strings.HasPrefix(imageID, "sha256:") {
-			info.ImageID = imageID[7:19] // Short hash
+	info.Mounts = make([]Mount, 0, len(data.Mounts))
+	for _, m := range data.Mounts {
+		mode := "ro"
+		if m.RW {
+			mode = "rw"
 		}
+		info.Mounts = append(info.Mounts, Mount{
+			Type:        m.Type,
+			Source:      m.Source,
+			Destination: m.Destination,
+			Mode:        mode,
+		})
 	}
 
-	// Host config for restart policy
-	if hostConfig, ok := data["HostConfig"].(map[string]interface{}); ok {
-		if restartPolicy, ok := hostConfig["RestartPolicy"].(map[string]interface{}); ok {
-			if name, ok := restartPolicy["Name"].(string); ok {
-				info.RestartPolicy = name
-			}
-		}
-	}
-
-	// Network settings
-	if netSettings, ok := data["NetworkSettings"].(map[string]interface{}); ok {
-		// Port mappings
-		if ports, ok := netSettings["Ports"].(map[string]interface{}); ok {
-			info.Ports = r.parsePortMappings(ports)
-			info.PortString = r.formatPortString(info.Ports)
-		}
-
-		// Networks
-		if networks, ok := netSettings["Networks"].(map[string]interface{}); ok {
-			info.Networks = make([]string, 0, len(networks))
-			for netName, netData := range networks {
-				info.Networks = append(info.Networks, netName)
-
-				// Get IP from first network
-				if info.IPAddress == "" {
-					if netMap, ok := netData.(map[string]interface{}); ok {
-						if ip, ok := netMap["IPAddress"].(string); ok {
-							info.IPAddress = ip
-						}
-						if gw, ok := netMap["Gateway"].(string); ok {
-							info.Gateway = gw
-						}
-						if mac, ok := netMap["MacAddress"].(string); ok {
-							info.MacAddress = mac
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Mounts
-	if mounts, ok := data["Mounts"].([]interface{}); ok {
-		info.Mounts = make([]Mount, 0, len(mounts))
-		for _, mountData := range mounts {
-			if m, ok := mountData.(map[string]interface{}); ok {
-				mount := Mount{}
-				if t, ok := m["Type"].(string); ok {
-					mount.Type = t
-				}
-				if s, ok := m["Source"].(string); ok {
-					mount.Source = s
-				}
-				if d, ok := m["Destination"].(string); ok {
-					mount.Destination = d
-				}
-				if rw, ok := m["RW"].(bool); ok {
-					if rw {
-						mount.Mode = "rw"
-					} else {
-						mount.Mode = "ro"
-					}
-				}
-				info.Mounts = append(info.Mounts, mount)
-			}
-		}
-	}
-
-	// Platform
-	if platform, ok := data["Platform"].(string); ok {
-		info.Platform = platform
-	}
+	info.Platform = data.Platform
 
 	return nil
 }
 
 // populateStatsData uses docker stats to get real-time resource usage.
 func (r *DefaultRetriever) populateStatsData(info *ContainerInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), statsTimeout)
+	defer cancel()
+
 	// Use --no-stream to get a single snapshot
-	cmd := exec.Command("docker", "stats", "--no-stream", "--format",
+	cmd := exec.CommandContext(ctx, "docker", "stats", "--no-stream", "--format",
 		"{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}",
 		info.ID)
 
@@ -227,26 +213,22 @@ func (r *DefaultRetriever) populateStatsData(info *ContainerInfo) error {
 }
 
 // parsePortMappings converts Docker port map to PortMapping structs.
-func (r *DefaultRetriever) parsePortMappings(ports map[string]interface{}) []PortMapping {
+func (r *DefaultRetriever) parsePortMappings(ports map[string][]inspectPortBinding) []PortMapping {
 	mappings := make([]PortMapping, 0)
 
-	for containerPort, bindings := range ports {
-		if bindings == nil {
-			continue
-		}
+	// Map iteration order is random; sort container ports for deterministic output.
+	containerPorts := make([]string, 0, len(ports))
+	for containerPort := range ports {
+		containerPorts = append(containerPorts, containerPort)
+	}
+	sort.Strings(containerPorts)
 
-		bindingsList, ok := bindings.([]interface{})
-		if !ok {
-			continue
-		}
-
-		for _, binding := range bindingsList {
-			bindingMap, ok := binding.(map[string]interface{})
-			if !ok {
-				continue
+	for _, containerPort := range containerPorts {
+		for _, binding := range ports[containerPort] {
+			mapping := PortMapping{
+				HostIP:   binding.HostIp,
+				HostPort: binding.HostPort,
 			}
-
-			mapping := PortMapping{}
 
 			// Parse container port (format: "8080/tcp")
 			portParts := strings.Split(containerPort, "/")
@@ -255,14 +237,6 @@ func (r *DefaultRetriever) parsePortMappings(ports map[string]interface{}) []Por
 			}
 			if len(portParts) >= 2 {
 				mapping.Protocol = portParts[1]
-			}
-
-			// Parse host binding
-			if hostIP, ok := bindingMap["HostIp"].(string); ok {
-				mapping.HostIP = hostIP
-			}
-			if hostPort, ok := bindingMap["HostPort"].(string); ok {
-				mapping.HostPort = hostPort
 			}
 
 			mappings = append(mappings, mapping)

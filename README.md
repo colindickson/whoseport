@@ -1,6 +1,6 @@
 # whoseport
 
-A comprehensive CLI utility to identify and manage processes listening on network ports. Written in Go with rich terminal UI, detailed process information, and zero external dependencies.
+A comprehensive CLI utility to identify and manage processes listening on network ports. Written in Go with rich terminal UI, detailed process information, and minimal external dependencies.
 
 ## Features
 
@@ -11,12 +11,12 @@ A comprehensive CLI utility to identify and manage processes listening on networ
 - **Comprehensive Process Data** - Combines `lsof` output with Linux `/proc` filesystem for deep insights
 - **Process Management** - Kill processes with interactive prompt or direct signal support
 - **Cross-Platform** - Runs on Linux and macOS with platform-specific optimizations
-- **Zero Dependencies** - Uses only Go standard library (plus Unicode width calculation libs)
+- **Minimal Dependencies** - Standard library plus two small Unicode width libraries
 
 ## Prerequisites
 
 - **Unix/Linux system** with `lsof` command
-- **Go 1.23+** (for building from source)
+- **Go 1.24+** (for building from source)
 - On **Linux**: Enhanced features via `/proc` filesystem
 - On **macOS**: Basic features via `lsof` (graceful degradation without `/proc`)
 
@@ -73,8 +73,9 @@ whoseport --no-interactive 8080
 ```
 
 **JSON Output** (for scripting)
+`--json` always implies `-n`, so the output is nothing but parseable JSON on stdout:
 ```bash
-whoseport --json 8080
+whoseport --json 8080 | jq .command
 ```
 
 ### Process Management
@@ -82,8 +83,7 @@ whoseport --json 8080
 **Kill with Interactive Prompt** (default behavior)
 ```bash
 whoseport 8080
-# Prompts: Kill process? (y/N)
-# Allows choosing signal: SIGTERM, SIGKILL, SIGINT, etc.
+# Prompts: Select action: [1] SIGTERM  [2] SIGKILL  [3] Cancel
 ```
 
 **Terminate Gracefully** (SIGTERM - allows cleanup)
@@ -118,52 +118,38 @@ whoseport --kill 8080
 ║                              🔍 PORT 8080 ANALYSIS                                     ║
 ╚════════════════════════════════════════════════════════════════════════════════════════╝
 
-  ┏━━━━━━━━━━━━━━━━━━━━━━━━┓
-  ┃ ⚙️  PROCESS IDENTITY   ┃
-  ┗━━━━━━━━━━━━━━━━━━━━━━━━┛
+  ▌ ⚙️  PROCESS IDENTITY
   Command:             node
   Full Command:        node server.js --port 8080
-  Process ID:          🔢 42573
+  Process ID:          42573
   Parent PID:          41234
   Parent Process:      bash
   User:                colin
   UID / GID:           501 / 20
   Child Processes:     3
 
-  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-  ┃ 📦 BINARY INFORMATION    ┃
-  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+  ▌ 📦 BINARY INFORMATION
   Executable Path:     /usr/local/bin/node
   Binary Size:         47.3 MB
   Environment Vars:    42
   Working Directory:   /home/colin/projects
 
-  ┏━━━━━━━━━━━━━━━━━━━┓
-  ┃ 📊 PROCESS STATE  ┃
-  ┗━━━━━━━━━━━━━━━━━━━┛
+  ▌ 📊 PROCESS STATE
   State:               🟢 S (Sleeping)
   Threads:             12
   Started:             2025-11-01 10:23:15
   Uptime:              ⏱ 2h 34m
   CPU Time:            45.23s (2.5%)
 
-  ┏━━━━━━━━━━━━━━━━━┓
-  ┃ 💾 MEMORY USAGE ┃
-  ┗━━━━━━━━━━━━━━━━━┛
+  ▌ 💾 MEMORY USAGE
   Resident Set (RSS):  124.5 MB
-  [██████████████████████████████░░]
   Virtual Memory:      2.3 GB
-  [███████████████░░░░░░░░░░░░░░░░░]
 
-  ┏━━━━━━━━━━━━━━━━━━━┓
-  ┃ 📁 FILE DESCRIPTORS┃
-  ┗━━━━━━━━━━━━━━━━━━━┛
+  ▌ 📁 FILE DESCRIPTORS
   Open FDs:            23 / 1024 (2.2%)
   [██░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
 
-  ┏━━━━━━━━━━━━━┓
-  ┃ 🌐 NETWORK  ┃
-  ┗━━━━━━━━━━━━━┛
+  ▌ 🌐 NETWORK
   Protocol:            IPV4
   Listening On:        🎧 *:8080 (LISTEN)
   Node Type:           TCP
@@ -173,7 +159,12 @@ whoseport --kill 8080
     ┃ 192.168.1.101:45679 → 192.168.1.50:8080 ESTABLISHED
 ```
 
+The UI adapts to your terminal width (capped at 90 columns, floored at 40) instead of a fixed layout.
+
 ### JSON Mode
+
+This is real, unedited `whoseport --json` output (only the username and home directory
+path have been changed) against a process listening on port 8080:
 
 ```bash
 $ whoseport --json 8080
@@ -181,40 +172,69 @@ $ whoseport --json 8080
 
 ```json
 {
-  "command": "node",
-  "id": 42573,
+  "command": "python3.11",
+  "id": 27149,
   "user": "colin",
-  "fd": "7u",
+  "fd": "3u",
   "type": "IPv4",
-  "device": "0x5e4b104643390241",
+  "device": "0xcc12b4321643610c",
   "size_offset": "0t0",
   "node": "TCP",
-  "name": "*:8080 (LISTEN)",
-  "full_command": "node server.js --port 8080",
-  "ppid": 41234,
-  "parent_command": "bash",
-  "state": "S",
-  "threads": 12,
-  "working_dir": "/home/colin/projects",
-  "memory_rss_kb": 127488,
-  "memory_vms_kb": 2457600,
-  "cpu_time_seconds": 45.23,
-  "start_time": "2025-11-01 10:23:15",
-  "uptime": "2h 34m",
-  "open_fds": 23,
-  "max_fds": 1024,
+  "name": "127.0.0.1:8080 (LISTEN)",
+  "full_command": "/Users/colin/.pyenv/versions/3.11.14/bin/python3 -m http.server 8080 --bind 127.0.0.1",
+  "ppid": 27147,
+  "parent_command": "/bin/zsh",
+  "state": "Sleeping (low-priority)",
+  "threads": 1,
+  "working_dir": "/",
+  "memory_rss_kb": 21136,
+  "memory_vms_kb": 435278224,
+  "cpu_time_seconds": 0.08,
+  "start_time": "2026-07-22 00:00:40",
+  "uptime": "3s",
+  "open_fds": 28,
+  "max_fds": 256,
   "uid": 501,
   "gid": 20,
-  "network_connections": 5,
+  "groups": "",
+  "network_connections": 1,
   "tcp_connections": [
-    "192.168.1.100:45678 → 192.168.1.50:8080 ESTABLISHED",
-    "192.168.1.101:45679 → 192.168.1.50:8080 ESTABLISHED"
+    "127.0.0.1:8080 (LISTEN)"
   ],
-  "exe_path": "/usr/local/bin/node",
-  "exe_size_bytes": 49643520,
-  "io_read_bytes": 1048576,
-  "io_write_bytes": 524288
+  "udp_connections": null,
+  "exe_path": "/Users/colin/.pyenv/versions/3.11.14/bin/python3",
+  "exe_size_bytes": 33816,
+  "nice_value": 5,
+  "priority": 31,
+  "env_count": 0,
+  "child_count": 0,
+  "io_read_bytes": 0,
+  "io_write_bytes": 0,
+  "io_read_syscalls": 0,
+  "io_write_syscalls": 0,
+  "memory_limit_kb": 0,
+  "cpu_percent": 0
 }
+```
+
+`fd` carries lsof's access-mode suffix (`r`/`w`/`u`) appended to the descriptor number,
+e.g. `"10u"`.
+
+**Platform-dependent fields** - this example was captured on macOS, where several fields
+are always zero/empty because the underlying data isn't available without `/proc`:
+- `groups`, `env_count`, `io_read_bytes`, `io_write_bytes`, `io_read_syscalls`,
+  `io_write_syscalls`, `memory_limit_kb` are Linux-only; on macOS they're always `0`/`""`.
+  `env_count` is `0` on macOS even for the caller's own child processes - modern macOS
+  (SIP) blocks reading another process's environment.
+- `state` is a human-readable expansion of the OS process state and its exact wording
+  differs by platform (e.g. `"Sleeping (interruptible)"` on Linux vs.
+  `"Sleeping (low-priority)"` on macOS above).
+- `udp_connections` is `null` when a process has no UDP sockets.
+
+`--json` output stays parseable even combined with `-k`/`-t` - their confirmation/error
+messages go to stderr, not stdout:
+```bash
+whoseport --json -t 8080 | python3 -m json.tool
 ```
 
 ## Docker Container Support
@@ -223,11 +243,10 @@ When **whoseport** detects that a port is being used by a Docker container, it a
 
 ### Docker Detection
 
-The tool automatically detects Docker containers in three ways:
+The tool automatically detects Docker containers in two ways:
 
 1. **docker-proxy processes** - Detects port forwarding proxies created by Docker
 2. **Container cgroup** - Checks if a process is running inside a container via `/proc/{pid}/cgroup`
-3. **Container environment** - Examines process environment variables for Docker indicators
 
 ### Docker Display Mode
 
@@ -304,15 +323,19 @@ Choice [4]:
 
 **Direct Actions**
 
-- **Stop container** (equivalent to `-t` flag)
-  ```bash
-  whoseport -t 8080  # Stops the Docker container gracefully
-  ```
+On a Docker-backed port, both `-t` and `-k` just stop the container (`docker stop`) without
+prompting; neither one removes it. Removing a container is only ever done as an explicit
+choice ([2] or [3]) in the interactive menu above - it's never a silent default.
 
-- **Stop and remove container** (equivalent to `-k` flag)
-  ```bash
-  whoseport -k 8080  # Stops and removes the Docker container
-  ```
+```bash
+whoseport -t 8080  # Stops the Docker container gracefully
+whoseport -k 8080  # Also just stops the container - does not remove it
+```
+
+**JSON Output** on a Docker-backed port emits the container's JSON (not the process JSON):
+```bash
+whoseport --json 8080 | jq .name
+```
 
 ### Docker Prerequisites
 
@@ -348,6 +371,9 @@ Interface-driven design enables easy testing and extension.
 - Command name, PID, User, File Descriptor
 - Protocol type (TCP/UDP), Network type (IPv4/IPv6)
 - Port and listening address
+
+If a process listens on the same port over both IPv4 and IPv6 (a common pattern), whoseport
+reports the first listener it finds rather than corrupting the output.
 
 ### Enhanced (from `/proc` on Linux)
 - **Process Details**: Full command line, parent process, state, threads
@@ -410,11 +436,12 @@ GOOS=darwin GOARCH=arm64 go build -o whoseport-darwin-arm64 ./cmd/whoseport
 ### CI/CD
 
 GitHub Actions workflow includes:
-- **Testing** on Ubuntu and macOS with Go 1.23 and 1.24
+- **Testing** on Ubuntu and macOS with Go 1.24
 - **Race detection** for concurrency issues
 - **Test coverage** reporting
-- **Cross-compilation** for multiple platforms
-- **Linting** with `go vet`, `go fmt`, and `staticcheck`
+- **Cross-compilation** for multiple platforms, building both the Linux- and Darwin-tagged
+  source on every run regardless of which OS the job happens to run on
+- **Linting** with `go vet` (native and Darwin-targeted), `go fmt`, and `staticcheck`
 - **Security scanning** with `govulncheck`
 
 ## Code Style
@@ -440,7 +467,7 @@ GitHub Actions workflow includes:
 **Runtime**: None (just `lsof` command)
 
 **Build Dependencies**:
-- Go 1.23+
+- Go 1.24+
 - `github.com/mattn/go-runewidth` - Unicode width calculation
 - `github.com/rivo/uniseg` - Unicode segmentation
 

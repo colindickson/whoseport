@@ -3,9 +3,12 @@ package format
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
+
+	"github.com/bluehoodie/whoseport/internal/terminal"
 )
 
 // FormatBytes converts bytes to human-readable format
@@ -21,6 +24,29 @@ func FormatBytes(bytes int64) string {
 	}
 }
 
+// FormatDuration formats a duration to human-readable string, e.g.
+// "2h 30m 15s" or "1d 0h 0m 0s".
+func FormatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
+	parts := []string{}
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 || days > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 || hours > 0 || days > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	parts = append(parts, fmt.Sprintf("%ds", seconds))
+
+	return strings.Join(parts, " ")
+}
+
 // FormatMemory converts KB to human-readable format
 func FormatMemory(kb int64) string {
 	if kb < 1024 {
@@ -32,12 +58,36 @@ func FormatMemory(kb int64) string {
 	}
 }
 
-// Truncate shortens a string to maxLen with ellipsis
+// Truncate shortens s to fit within maxLen display columns (not bytes or
+// runes), appending "..." when truncation occurs. It is grapheme-aware, so
+// multi-byte/emoji input is never split mid-rune. It never panics: maxLen
+// <= 0 returns "", and 0 < maxLen <= 3 returns that many "." characters
+// instead of a truncated fragment plus ellipsis.
 func Truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	if VisualWidth(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	if maxLen <= 3 {
+		return strings.Repeat(".", maxLen)
+	}
+
+	target := maxLen - 3
+	var b strings.Builder
+	width := 0
+	graphemes := uniseg.NewGraphemes(s)
+	for graphemes.Next() {
+		cluster := graphemes.Str()
+		clusterWidth := runewidth.StringWidth(cluster)
+		if width+clusterWidth > target {
+			break
+		}
+		b.WriteString(cluster)
+		width += clusterWidth
+	}
+	return b.String() + "..."
 }
 
 // VisualWidth calculates the visual width of a string accounting for emojis
@@ -56,9 +106,13 @@ func VisualWidth(s string) int {
 	return width
 }
 
-// StripAnsiCodes removes ANSI escape sequences from a string
+// StripAnsiCodes removes ANSI escape sequences from a string.
+// ponytail: only recognizes ESC...m (SGR color codes), which is all this
+// repo ever emits; other escape sequences (cursor moves, etc.) would not
+// be stripped correctly. Upgrade to a full CSI-aware parser if that changes.
 func StripAnsiCodes(s string) string {
-	result := ""
+	var b strings.Builder
+	b.Grow(len(s))
 	inEscape := false
 	for _, c := range s {
 		if c == '\033' {
@@ -71,9 +125,9 @@ func StripAnsiCodes(s string) string {
 			}
 			continue
 		}
-		result += string(c)
+		b.WriteRune(c)
 	}
-	return result
+	return b.String()
 }
 
 // GetStateEmoji returns an emoji representing the process state
@@ -92,18 +146,16 @@ func GetStateEmoji(state string) string {
 	return "⚪"
 }
 
-// GetStateColor returns the color for a process state
-func GetStateColor(state string, theme interface{}) string {
-	// Accept theme as interface{} to avoid circular dependency
-	// Caller should pass theme colors directly
+// GetStateColor returns the theme color for a process state.
+func GetStateColor(state string, theme terminal.Theme) string {
 	if strings.Contains(state, "Running") {
-		return "\033[32m" // Green
+		return theme.StateRunning
 	} else if strings.Contains(state, "Sleeping") {
-		return "\033[36m" // Cyan
+		return theme.StateSleeping
 	} else if strings.Contains(state, "Zombie") {
-		return "\033[31m" // Red
+		return theme.StateZombie
 	} else if strings.Contains(state, "Stopped") {
-		return "\033[33m" // Yellow
+		return theme.StateStopped
 	}
-	return "\033[37m" // White
+	return theme.StateDefault
 }

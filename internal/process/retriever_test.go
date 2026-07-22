@@ -20,7 +20,7 @@ func TestProcessRetriever_GetProcessByPort(t *testing.T) {
 		{
 			name:       "successful retrieval",
 			port:       8080,
-			execOutput: testutil.SampleLsofOutput(),
+			execOutput: "p12345\ncnode\nLtestuser\nf21\ntIPv4\nPTCP\nn*:8080\n",
 			execErr:    nil,
 			wantCmd:    "node",
 			wantPID:    12345,
@@ -70,6 +70,21 @@ func TestProcessRetriever_GetProcessByPort(t *testing.T) {
 				t.Errorf("ID = %v, want %v", info.ID, tt.wantPID)
 			}
 		})
+	}
+}
+
+// TestProcessRetriever_GetProcessByPort_ErrNoServiceUnwraps ensures ErrNoService
+// survives retriever.go's fmt.Errorf("...: %w", err) wrapping, since main.go
+// relies on errors.Is(err, process.ErrNoService) to print a friendly message
+// instead of a raw error.
+func TestProcessRetriever_GetProcessByPort_ErrNoServiceUnwraps(t *testing.T) {
+	mockExec := &testutil.MockLsofExecutor{Output: "", Err: nil}
+	retriever := NewProcessRetriever(mockExec, NewLsofParser())
+
+	_, err := retriever.GetProcessByPort(8080)
+
+	if !errors.Is(err, ErrNoService) {
+		t.Fatalf("GetProcessByPort() error = %v, want errors.Is(err, ErrNoService)", err)
 	}
 }
 

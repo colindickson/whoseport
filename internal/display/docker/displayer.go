@@ -19,7 +19,7 @@ type Displayer struct {
 func NewDisplayer() *Displayer {
 	return &Displayer{
 		theme: terminal.DefaultTheme(),
-		width: 90,
+		width: terminal.Width(),
 	}
 }
 
@@ -212,6 +212,14 @@ func (d *Displayer) printDockerBanner(text string) {
 	leftPadding := (innerWidth - textLen - emojiWidth) / 2
 	rightPadding := innerWidth - textLen - emojiWidth - leftPadding
 
+	// leftPadding-1 below reserves a column for the whale emoji's leading
+	// space; on a narrow terminal leftPadding can be 0, which would make
+	// that a negative Repeat count and panic.
+	whaleLeadPadding := leftPadding - 1
+	if whaleLeadPadding < 0 {
+		whaleLeadPadding = 0
+	}
+
 	// Top border with Docker-themed color (blue)
 	fmt.Printf("%s%s╔", terminal.ColorBold, terminal.ColorBrightBlue)
 	for i := 0; i < innerWidth; i++ {
@@ -222,7 +230,7 @@ func (d *Displayer) printDockerBanner(text string) {
 	// Middle line with Docker whale emoji
 	fmt.Printf("%s%s║%s%s🐳  %s%s%s%s║%s\n",
 		terminal.ColorBold, terminal.ColorBrightBlue,
-		strings.Repeat(" ", leftPadding-1), // -1 for whale emoji space
+		strings.Repeat(" ", whaleLeadPadding), // -1 for whale emoji space
 		terminal.ColorBold, terminal.ColorBrightCyan, text, terminal.ColorReset,
 		strings.Repeat(" ", rightPadding),
 		terminal.ColorReset)
