@@ -2,12 +2,12 @@ package process
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 )
 
-// LsofExecutor executes lsof command with grep to find listening processes.
+// LsofExecutor executes lsof to find processes listening on a port.
 type LsofExecutor struct{}
 
 // NewLsofExecutor creates a new LsofExecutor.
@@ -15,31 +15,24 @@ func NewLsofExecutor() *LsofExecutor {
 	return &LsofExecutor{}
 }
 
-// Execute runs lsof piped through grep to find processes listening on the specified port.
+// Execute runs lsof, filtered to listening TCP sockets on the specified port, and
+// returns its field-output (-F) mode output for the Parser to consume.
 func (e *LsofExecutor) Execute(port int) ([]byte, error) {
-	c1 := exec.Command("lsof", "-i", fmt.Sprintf(":%d", port))
-	c2 := exec.Command("grep", "LISTEN")
+	cmd := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "pcLftdoPn")
 
-	r, w := io.Pipe()
-	defer r.Close()
+	var out bytes.Buffer
+	cmd.Stdout = &out
 
-	c1.Stdout = w
-	c2.Stdin = r
-
-	var b2 bytes.Buffer
-	c2.Stdout = &b2
-
-	if err := c1.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start lsof: %w", err)
+	err := cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			// lsof exits non-zero when nothing matches the selection criteria;
+			// that just means no process is listening on this port.
+			return out.Bytes(), nil
+		}
+		return nil, fmt.Errorf("failed to run lsof: %w", err)
 	}
 
-	if err := c2.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start grep: %w", err)
-	}
-
-	c1.Wait()
-	w.Close()
-	c2.Wait()
-
-	return b2.Bytes(), nil
+	return out.Bytes(), nil
 }
