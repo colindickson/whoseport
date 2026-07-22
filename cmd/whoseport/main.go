@@ -49,6 +49,7 @@ func main() {
 		fmt.Printf("  %s-n, --no-interactive%s  Disable interactive mode (show info only)\n", terminal.ColorYellow, terminal.ColorReset)
 		fmt.Printf("  %s--json%s                Output in JSON format (implies -n)\n", terminal.ColorYellow, terminal.ColorReset)
 		fmt.Printf("\n%sNote:%s Interactive mode is enabled by default\n", terminal.ColorBold, terminal.ColorReset)
+		fmt.Printf("%sNote:%s On a Docker-backed port, -k and -t both stop the container (docker stop); neither removes it. Removing a container is only offered as an explicit choice in the interactive menu.\n", terminal.ColorBold, terminal.ColorReset)
 		fmt.Printf("\n%sExample:%s\n", terminal.ColorBold, terminal.ColorReset)
 		fmt.Printf("  whoseport 8080           # Show detailed info with interactive prompt\n")
 		fmt.Printf("  whoseport -n 8080        # Show info only, no prompt\n")
@@ -147,16 +148,11 @@ func handleDockerContainer(containerID string, processInfo *model.ProcessInfo, p
 	actionHandler := dockerpkg.NewActionHandler()
 
 	if killFlag || termFlag {
-		// Direct action without prompting (equivalent to -k/-t flags)
-		// For Docker, -k/-t means stop and remove the container
-		var action dockerpkg.Action
-		if killFlag {
-			action = dockerpkg.ActionStopAndRemove
-		} else {
-			action = dockerpkg.ActionStop
-		}
-
-		if err := actionHandler.ExecuteAction(action, containerInfo); err != nil {
+		// Direct action without prompting (equivalent to -k/-t flags).
+		// -k/-t only stop the container (reversible) -- removing a container is
+		// irreversible and is never a silent default, only an explicit choice
+		// in the interactive menu (see PromptAction/ActionStopAndRemove below).
+		if err := actionHandler.ExecuteAction(dockerpkg.ActionStop, containerInfo); err != nil {
 			fmt.Printf("%s✗ Failed to execute action:%s %v\n", terminal.ColorRed, terminal.ColorReset, err)
 			os.Exit(1)
 		}
