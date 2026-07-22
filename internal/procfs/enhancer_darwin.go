@@ -71,15 +71,12 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	cmd = exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
 	if output, err := cmd.Output(); err == nil {
 		comm := strings.TrimSpace(string(output))
-		// Try to find the full path
+		// ps -o comm= on macOS normally already returns an absolute path.
+		// If it doesn't, leave ExePath empty rather than guessing at a
+		// path via the caller's own $PATH, which can resolve to a
+		// completely different binary than the one actually running.
 		if strings.HasPrefix(comm, "/") {
 			info.ExePath = comm
-		} else {
-			// Try to resolve using which
-			whichCmd := exec.Command("which", comm)
-			if whichOutput, err := whichCmd.Output(); err == nil {
-				info.ExePath = strings.TrimSpace(string(whichOutput))
-			}
 		}
 
 		// Get executable size if we have a path
