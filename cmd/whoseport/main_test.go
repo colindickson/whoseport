@@ -300,43 +300,6 @@ func BenchmarkStripAnsiCodes(b *testing.B) {
 	}
 }
 
-// TestIntegration_LsofParsing is an integration test for the full lsof flow
-func TestIntegration_LsofParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// This test would require mocking exec.Command
-	// For now, we'll just verify the structure is correct
-	t.Skip("Integration test requires system setup")
-}
-
-// TestIntegration_ProcFSParsing tests /proc filesystem parsing
-func TestIntegration_ProcFSParsing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// This test would require setting up a mock /proc filesystem
-	t.Skip("Integration test requires mock /proc setup")
-}
-
-// TestIntegration_SignalSelection tests the interactive signal selection flow
-func TestIntegration_SignalSelection(t *testing.T) {
-	// This test verifies the full flow: find process -> prompt for kill -> prompt for signal -> kill
-	// For now, this is a placeholder that verifies the structure
-	// Full implementation would require mocking the entire flow
-	t.Skip("Integration test requires full mock setup")
-}
-
-// TestIntegration_BackwardCompatibility tests that -k flag still uses SIGTERM
-func TestIntegration_BackwardCompatibility(t *testing.T) {
-	// This test verifies that existing behavior is preserved:
-	// whoseport -k 8080 should still send SIGTERM by default
-	// Full implementation would require process mocking
-	t.Skip("Integration test requires process mocking")
-}
-
 // TestFlagParsing_KillFlag tests that -k flag is parsed correctly
 func TestFlagParsing_KillFlag(t *testing.T) {
 	// Reset flags for testing
