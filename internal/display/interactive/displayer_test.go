@@ -95,10 +95,15 @@ func TestDisplayShowsEnvCountWhenPositive(t *testing.T) {
 
 // TestPrintGradientBannerNarrowWidthDoesNotPanic guards the same class of
 // bug fixed in the Docker banner: padding math must never go negative when
-// the terminal width is smaller than the banner text.
+// the terminal width is smaller than the banner text. Beyond not panicking,
+// it also verifies the actual property the width fix is supposed to
+// guarantee: a well-formed box (all three lines the same visual width, no
+// garbling) with the banner text intact, rather than just an absence of a
+// crash.
 func TestPrintGradientBannerNarrowWidthDoesNotPanic(t *testing.T) {
 	d := NewDisplayer()
 	d.width = 20
+	bannerText := "PORT 12345 ANALYSIS"
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -106,7 +111,30 @@ func TestPrintGradientBannerNarrowWidthDoesNotPanic(t *testing.T) {
 		}
 	}()
 
-	captureOutput(func() {
-		d.printGradientBanner("PORT 12345 ANALYSIS")
+	output := captureOutput(func() {
+		d.printGradientBanner(bannerText)
 	})
+
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(format.StripAnsiCodes(line)) == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 banner lines (top border, text, bottom border), got %d: %q", len(lines), lines)
+	}
+
+	width := format.VisualWidth(lines[0])
+	for i, line := range lines {
+		if w := format.VisualWidth(line); w != width {
+			t.Fatalf("banner line %d has visual width %d, want %d (matching line 0) - box is misaligned:\n%s", i, w, width, output)
+		}
+	}
+
+	if !strings.Contains(format.StripAnsiCodes(lines[1]), bannerText) {
+		t.Fatalf("expected banner text %q intact in output, got: %s", bannerText, format.StripAnsiCodes(lines[1]))
+	}
 }
