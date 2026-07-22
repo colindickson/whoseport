@@ -135,14 +135,16 @@ func TestHexToIPv6(t *testing.T) {
 }
 
 // TestParseAddressIPv6 verifies IPv6 loopback/unspecified addresses format
-// correctly through ParseAddress, including the "*" wildcard for unspecified.
+// correctly through ParseAddress, including the "*" wildcard for unspecified
+// and RFC 3986 bracketing (net.JoinHostPort) so the address/port boundary is
+// unambiguous, e.g. "[::1]:8080" rather than "::1:8080".
 func TestParseAddressIPv6(t *testing.T) {
 	tests := []struct {
 		name string
 		hex  string
 		want string
 	}{
-		{"loopback:8080", "00000000000000000000000001000000:1F90", "::1:8080"},
+		{"loopback:8080", "00000000000000000000000001000000:1F90", "[::1]:8080"},
 		{"unspecified:3000", "00000000000000000000000000000000:0BB8", "*:3000"},
 	}
 

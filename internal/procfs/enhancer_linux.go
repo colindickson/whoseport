@@ -457,7 +457,7 @@ func ParseAddress(hex string) string {
 		return fmt.Sprintf("*:%d", port)
 	}
 
-	return fmt.Sprintf("%s:%d", ip, port)
+	return net.JoinHostPort(ip, strconv.FormatInt(port, 10))
 }
 
 // HexToIP converts a /proc/net/{tcp,udp}[6] hex address to an IP string.

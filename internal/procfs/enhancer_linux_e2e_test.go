@@ -149,11 +149,11 @@ func TestEnhanceEndToEnd(t *testing.T) {
 
 	foundIPv6 := false
 	for _, c := range info.TCPConns {
-		if c == "::1:9090 -> *:0 [LISTEN]" {
+		if c == "[::1]:9090 -> *:0 [LISTEN]" {
 			foundIPv6 = true
 		}
 	}
 	if !foundIPv6 {
-		t.Errorf("TCPConns = %v, want an ::1:9090 -> *:0 [LISTEN] entry read from net/tcp6", info.TCPConns)
+		t.Errorf("TCPConns = %v, want a [::1]:9090 -> *:0 [LISTEN] entry read from net/tcp6", info.TCPConns)
 	}
 }
