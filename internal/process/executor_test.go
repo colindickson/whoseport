@@ -1,6 +1,7 @@
 package process
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,73 @@ import (
 	"strings"
 	"testing"
 )
+
+// TestClassifyLsofResult exercises the exit-status classification logic in
+// isolation (Fix 2): a non-zero exit is "no match" only when lsof produced no
+// output at all on stdout or stderr; any output on either stream means lsof hit
+// a real problem (bad flags, broken wrapper, unsupported option), and that must
+// surface as an error - not be swallowed as "nothing is listening".
+func TestClassifyLsofResult(t *testing.T) {
+	exitErr := &exec.ExitError{}
+
+	tests := []struct {
+		name       string
+		stdout     []byte
+		stderr     []byte
+		err        error
+		wantErr    bool
+		wantOutput []byte
+	}{
+		{
+			name:       "success",
+			stdout:     []byte("p123\n"),
+			err:        nil,
+			wantOutput: []byte("p123\n"),
+		},
+		{
+			name:       "non-zero exit, no output at all: no match",
+			stdout:     nil,
+			stderr:     nil,
+			err:        exitErr,
+			wantOutput: nil,
+		},
+		{
+			name:    "non-zero exit with stderr text: real error, not swallowed",
+			stdout:  nil,
+			stderr:  []byte("lsof: unsupported option: -sTCP:LISTEN\n"),
+			err:     exitErr,
+			wantErr: true,
+		},
+		{
+			name:    "non-error exec failure (e.g. lsof not on PATH)",
+			stdout:  nil,
+			stderr:  nil,
+			err:     errors.New("exec: \"lsof\": executable file not found in $PATH"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := classifyLsofResult(tt.stdout, tt.stderr, tt.err)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("classifyLsofResult() error = nil, want error")
+				}
+				if len(tt.stderr) > 0 && !strings.Contains(err.Error(), strings.TrimSpace(string(tt.stderr))) {
+					t.Errorf("classifyLsofResult() error = %q, want it to contain stderr text %q", err, tt.stderr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("classifyLsofResult() unexpected error: %v", err)
+			}
+			if string(out) != string(tt.wantOutput) {
+				t.Errorf("classifyLsofResult() output = %q, want %q", out, tt.wantOutput)
+			}
+		})
+	}
+}
 
 // TestLsofExecutor_Execute exercises the real lsof binary (no mocking): it is the
 // simplest way to verify the grep subprocess is gone and that lsof's "nothing

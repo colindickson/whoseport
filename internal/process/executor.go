@@ -20,19 +20,33 @@ func NewLsofExecutor() *LsofExecutor {
 func (e *LsofExecutor) Execute(port int) ([]byte, error) {
 	cmd := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "pcLfatdoPn")
 
-	var out bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			// lsof exits non-zero when nothing matches the selection criteria;
-			// that just means no process is listening on this port.
-			return out.Bytes(), nil
-		}
-		return nil, fmt.Errorf("failed to run lsof: %w", err)
+	return classifyLsofResult(out.Bytes(), stderr.Bytes(), err)
+}
+
+// classifyLsofResult decides whether a completed lsof run found no match or hit a
+// real error. lsof exits non-zero both when nothing matches the selection criteria
+// and when something is actually wrong (bad flags, a broken wrapper on PATH, an
+// lsof build that rejects one of our options); the only way to tell those apart is
+// that a genuine problem produces output on stdout and/or stderr, while "no match"
+// produces neither. Treating every non-zero exit as "no match" would silently
+// report a false negative, which is worse than surfacing an error.
+func classifyLsofResult(stdout, stderr []byte, err error) ([]byte, error) {
+	if err == nil {
+		return stdout, nil
 	}
 
-	return out.Bytes(), nil
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(stdout) == 0 && len(stderr) == 0 {
+		return nil, nil
+	}
+
+	if len(stderr) > 0 {
+		return nil, fmt.Errorf("lsof failed: %s: %w", bytes.TrimSpace(stderr), err)
+	}
+	return nil, fmt.Errorf("failed to run lsof: %w", err)
 }
