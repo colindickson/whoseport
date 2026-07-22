@@ -50,14 +50,6 @@ func isDockerPortHandler(command string) bool {
 	return dockerPortHandlerNames[name]
 }
 
-// Detector identifies if a process is related to a Docker container.
-type Detector interface {
-	// IsDockerRelated checks if the given process is Docker-related
-	// Returns true and container ID if it's a Docker container process
-	// port parameter is used to find containers by port mapping (useful for Docker Desktop on macOS)
-	IsDockerRelated(info *model.ProcessInfo, port int) (bool, string, error)
-}
-
 // DefaultDetector implements Docker detection logic.
 type DefaultDetector struct {
 	availableOnce sync.Once
@@ -65,7 +57,7 @@ type DefaultDetector struct {
 }
 
 // NewDetector creates a new Docker detector.
-func NewDetector() Detector {
+func NewDetector() *DefaultDetector {
 	return &DefaultDetector{}
 }
 
