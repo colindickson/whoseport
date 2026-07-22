@@ -21,7 +21,7 @@ type Retriever interface {
 type DefaultRetriever struct{}
 
 // NewRetriever creates a new Docker container retriever.
-func NewRetriever() Retriever {
+func NewRetriever() *DefaultRetriever {
 	return &DefaultRetriever{}
 }
 
