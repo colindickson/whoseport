@@ -1,6 +1,6 @@
 # whoseport
 
-A comprehensive CLI utility to identify and manage processes listening on network ports. Written in Go with rich terminal UI, detailed process information, and zero external dependencies.
+A comprehensive CLI utility to identify and manage processes listening on network ports. Written in Go with rich terminal UI, detailed process information, and minimal external dependencies.
 
 ## Features
 
@@ -11,12 +11,12 @@ A comprehensive CLI utility to identify and manage processes listening on networ
 - **Comprehensive Process Data** - Combines `lsof` output with Linux `/proc` filesystem for deep insights
 - **Process Management** - Kill processes with interactive prompt or direct signal support
 - **Cross-Platform** - Runs on Linux and macOS with platform-specific optimizations
-- **Zero Dependencies** - Uses only Go standard library (plus Unicode width calculation libs)
+- **Minimal Dependencies** - Standard library plus two small Unicode width libraries
 
 ## Prerequisites
 
 - **Unix/Linux system** with `lsof` command
-- **Go 1.23+** (for building from source)
+- **Go 1.24+** (for building from source)
 - On **Linux**: Enhanced features via `/proc` filesystem
 - On **macOS**: Basic features via `lsof` (graceful degradation without `/proc`)
 
@@ -440,7 +440,7 @@ GitHub Actions workflow includes:
 **Runtime**: None (just `lsof` command)
 
 **Build Dependencies**:
-- Go 1.23+
+- Go 1.24+
 - `github.com/mattn/go-runewidth` - Unicode width calculation
 - `github.com/rivo/uniseg` - Unicode segmentation
 

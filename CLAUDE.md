@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Module**: github.com/bluehoodie/whoseport
 - **Type**: Standalone single-binary CLI application
 - **Architecture**: Modern Go project layout with SOLID principles
-- **Dependencies**: Zero external dependencies (stdlib only)
+- **Dependencies**: Minimal — stdlib plus two small Unicode width libraries (`go-runewidth`, `uniseg`)
 - **Platform**: Unix/Linux systems with `lsof` and `/proc` filesystem
 - **Docker Support**: Automatic detection and management of Docker containers using ports
 
@@ -87,7 +87,7 @@ internal/
 - `Retriever` interface: Retrieves container information via `docker inspect` and `docker stats`
 - `ActionHandler`: Prompts for and executes Docker actions (stop, remove)
 - `ContainerInfo`: Container-specific data structure with ports, image, stats, etc.
-- Detects containers via: docker-proxy processes, cgroup analysis, environment inspection
+- Detects containers via: docker-proxy processes, cgroup analysis
 
 **internal/display** - Output formatting:
 - `format/`: Utility functions (FormatBytes, FormatMemory, VisualWidth, StripAnsiCodes)
@@ -96,8 +96,8 @@ internal/
 - `json/`: Structured JSON output for scripting
 
 **internal/action** - Process actions:
-- `Killer`: Sends SIGTERM to processes
-- `Prompter`: Interactive y/N prompts
+- `Killer`: Sends a given signal (SIGKILL/SIGTERM/etc.) to a process by PID
+- `Prompter`: Interactive prompt to pick a signal (SIGTERM/SIGKILL) or cancel
 
 **internal/terminal** - Theme system:
 - Color constants (basic, bright, 256-color palette)
@@ -106,7 +106,7 @@ internal/
 ### CLI Interface
 - Entry point: `cmd/whoseport/main.go`
 - Flag parsing: Go standard `flag` package
-- Flags: `-k/--kill`, `-n/--no-interactive`, `--json`
+- Flags: `-k/--kill`, `-t/--term`, `-n/--no-interactive`, `--json` (implies `-n`)
 - Required argument: Port number (integer)
 
 ## Key Implementation Details
@@ -129,7 +129,7 @@ Parse lsof output → ProcessInfo struct
     ↓
 Enhance with /proc filesystem data
     ↓
-Docker detection (check cgroup, process name, environment)
+Docker detection (check cgroup, docker-proxy process name)
     ↓
 Display (JSON or Interactive UI)
     ↓
