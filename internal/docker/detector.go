@@ -90,9 +90,12 @@ func (d *DefaultDetector) IsDockerRelated(info *model.ProcessInfo, port int) (bo
 		}
 	}
 
-	// Strategy 2: Check if the process is docker-proxy (Linux)
-	// docker-proxy is the process that forwards ports from host to container
-	if strings.Contains(info.Command, "docker-proxy") && d.dockerAvailable() {
+	// Strategy 2: Check if the process is a known Docker port-handling binary (Linux)
+	// and try to resolve its container via the -container-ip argument some of these
+	// binaries (e.g. docker-proxy) expose. Uses the same exact-basename allowlist as
+	// Strategy 1 rather than a substring match, so a binary merely named like
+	// "docker-proxy" cannot be misidentified.
+	if isDockerPortHandler(info.Command) && d.dockerAvailable() {
 		containerID := d.findContainerFromDockerProxy(info)
 		if containerID != "" {
 			return true, containerID, nil
