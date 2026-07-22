@@ -32,7 +32,7 @@ func (d *Displayer) Display(info *model.ProcessInfo, port int) {
 	d.printModernSection("⚙️  PROCESS IDENTITY")
 	d.printEnhancedField("Command", info.Command, terminal.ColorBrightGreen, "")
 	d.printEnhancedField("Full Command", format.Truncate(info.FullCommand, 60), terminal.ColorLime, "")
-	d.printEnhancedField("Process ID", fmt.Sprintf("%d", info.ID), terminal.ColorOrange, "PID")
+	d.printEnhancedField("Process ID", fmt.Sprintf("%d", info.ID), terminal.ColorOrange, "")
 	d.printEnhancedField("Parent PID", fmt.Sprintf("%d", info.PPid), terminal.ColorPeach, "")
 	if info.ParentCommand != "" {
 		d.printEnhancedField("Parent Process", info.ParentCommand, terminal.ColorLavender, "")
