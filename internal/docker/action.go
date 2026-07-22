@@ -154,21 +154,3 @@ func (h *ActionHandler) removeContainer(info *ContainerInfo, force bool) error {
 	fmt.Fprintf(h.writer, "%s✓ Container %s removed successfully%s\n", h.colorGreen, info.Name, h.colorReset)
 	return nil
 }
-
-// Stop stops a container (convenience method).
-func Stop(containerID string) error {
-	cmd := exec.Command("docker", "stop", containerID)
-	return cmd.Run()
-}
-
-// Remove removes a container (convenience method).
-func Remove(containerID string, force bool) error {
-	args := []string{"rm"}
-	if force {
-		args = append(args, "-f")
-	}
-	args = append(args, containerID)
-
-	cmd := exec.Command("docker", args...)
-	return cmd.Run()
-}
