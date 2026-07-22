@@ -28,8 +28,13 @@ type ActionHandler struct {
 }
 
 // NewActionHandler creates a new Docker action handler.
+//
+// writer is os.Stderr, not os.Stdout: action progress/result messages
+// (and, since PromptAction shares the same writer, the interactive
+// Docker action prompt) are diagnostics, not the requested output, and
+// must never land in a stdout stream a caller may be parsing (e.g. --json).
 func NewActionHandler() *ActionHandler {
-	return &ActionHandler{reader: os.Stdin, writer: os.Stdout}
+	return &ActionHandler{reader: os.Stdin, writer: os.Stderr}
 }
 
 // NewActionHandlerWithIO creates a new action handler with custom reader/writer (for testing).
