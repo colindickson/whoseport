@@ -21,6 +21,19 @@ import (
 // before giving up on Docker detection entirely.
 const dockerProbeTimeout = 2 * time.Second
 
+// containerIPPattern extracts the -container-ip argument from a docker-proxy command line.
+var containerIPPattern = regexp.MustCompile(`-container-ip\s+([0-9.]+)`)
+
+// dockerCgroupPattern extracts a container ID from a /proc/<pid>/cgroup path. Docker cgroup
+// paths typically look like:
+//
+//	12:memory:/docker/8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f
+//
+// or
+//
+//	12:memory:/system.slice/docker-8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f.scope
+var dockerCgroupPattern = regexp.MustCompile(`/docker[/-]([a-f0-9]{64})`)
+
 // dockerPortHandlerNames are the known executable names of processes that own a host
 // port on behalf of a Docker container (as opposed to any process whose command line
 // merely mentions "docker", e.g. one launched from a path containing that word).
@@ -206,8 +219,7 @@ func (d *DefaultDetector) extractContainerIPFromProxy(info *model.ProcessInfo) s
 	cmdline := info.FullCommand
 
 	// Look for -container-ip argument
-	re := regexp.MustCompile(`-container-ip\s+([0-9.]+)`)
-	matches := re.FindStringSubmatch(cmdline)
+	matches := containerIPPattern.FindStringSubmatch(cmdline)
 	if len(matches) >= 2 {
 		return matches[1]
 	}
@@ -270,17 +282,10 @@ func (d *DefaultDetector) checkCgroupForContainer(pid int) (string, error) {
 	}
 	defer file.Close()
 
-	// Pattern for extracting container ID from cgroup paths
-	// Docker cgroup paths typically look like:
-	// 12:memory:/docker/8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f
-	// or
-	// 12:memory:/system.slice/docker-8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f8f.scope
-	dockerPattern := regexp.MustCompile(`/docker[/-]([a-f0-9]{64})`)
-
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		matches := dockerPattern.FindStringSubmatch(line)
+		matches := dockerCgroupPattern.FindStringSubmatch(line)
 		if len(matches) >= 2 {
 			return matches[1], nil
 		}
