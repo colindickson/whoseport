@@ -17,101 +17,14 @@ import (
 	"github.com/bluehoodie/whoseport/internal/procfs"
 )
 
-// TestToProcessInfo tests the lsof output parsing
-func TestToProcessInfo(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    *model.ProcessInfo
-		wantErr bool
-	}{
-		{
-			name:  "valid lsof output with IPv4",
-			input: "node    12345 testuser   21u  IPv4 0x123456      0t0  TCP *:8080 (LISTEN)",
-			want: &model.ProcessInfo{
-				Command:    "node",
-				ID:         12345,
-				User:       "testuser",
-				FD:         "21u",
-				Type:       "IPv4",
-				Device:     "0x123456",
-				SizeOffset: "0t0",
-				Node:       "TCP",
-				Name:       "*:8080 (LISTEN)",
-			},
-			wantErr: false,
-		},
-		{
-			name:  "valid lsof output with IPv6",
-			input: "python3    9876 www-data   3u  IPv6 0xabcdef      0t0  TCP *:3000 (LISTEN)",
-			want: &model.ProcessInfo{
-				Command:    "python3",
-				ID:         9876,
-				User:       "www-data",
-				FD:         "3u",
-				Type:       "IPv6",
-				Device:     "0xabcdef",
-				SizeOffset: "0t0",
-				Node:       "TCP",
-				Name:       "*:3000 (LISTEN)",
-			},
-			wantErr: false,
-		},
-		{
-			name:    "invalid lsof output - too few fields",
-			input:   "node 12345 testuser",
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name:    "invalid lsof output - non-numeric PID",
-			input:   "node abcde testuser   21u  IPv4 0x123456      0t0  TCP *:8080 (LISTEN)",
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name:    "empty input",
-			input:   "",
-			want:    nil,
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := process.NewLsofParser()
-			got, err := parser.Parse([]byte(tt.input))
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("toProcessInfo() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr {
-				return
-			}
-
-			if got.Command != tt.want.Command {
-				t.Errorf("Command = %v, want %v", got.Command, tt.want.Command)
-			}
-			if got.ID != tt.want.ID {
-				t.Errorf("ID = %v, want %v", got.ID, tt.want.ID)
-			}
-			if got.User != tt.want.User {
-				t.Errorf("User = %v, want %v", got.User, tt.want.User)
-			}
-			if got.FD != tt.want.FD {
-				t.Errorf("FD = %v, want %v", got.FD, tt.want.FD)
-			}
-			if got.Type != tt.want.Type {
-				t.Errorf("Type = %v, want %v", got.Type, tt.want.Type)
-			}
-			if got.Name != tt.want.Name {
-				t.Errorf("Name = %v, want %v", got.Name, tt.want.Name)
-			}
-		})
-	}
-}
+// NOTE: lsof output parsing used to be tested here (TestToProcessInfo), but
+// it asserted against a parser input format (a single space-delimited line)
+// that no longer exists -- process.NewLsofParser() now parses lsof -F
+// field-mode output, and its output no longer resembles this test's
+// expectations at all (hence the two failures below). That coverage lives in
+// internal/process/parser_test.go (TestLsofParser_Parse) instead, which is
+// strictly stronger: it also covers multi-row/multi-PID lsof output and the
+// ErrNoService sentinel.
 
 // TestFormatBytes tests byte formatting
 func TestFormatBytes(t *testing.T) {
