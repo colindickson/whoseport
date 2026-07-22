@@ -173,25 +173,43 @@ func parseStatus(status string, info *model.ProcessInfo) {
 	}
 }
 
+// parseStat parses /proc/[pid]/stat. Field 2 (comm) is wrapped in
+// parentheses and can itself contain spaces and parentheses (e.g. Firefox's
+// "Web Content" processes), so every field after it must be located relative
+// to the LAST ')' rather than by naive whitespace splitting of the whole
+// line (see man 5 proc).
 func parseStat(stat string, info *model.ProcessInfo) {
-	fields := strings.Fields(stat)
-	if len(fields) < 22 {
+	lastParen := strings.LastIndex(stat, ")")
+	if lastParen == -1 || lastParen+1 >= len(stat) {
 		return
 	}
 
-	if len(fields) > 17 {
-		info.Priority, _ = strconv.Atoi(fields[17])
-	}
-	if len(fields) > 18 {
-		info.NiceValue, _ = strconv.Atoi(fields[18])
+	// fields[0] is "state" (proc stat field 3); everything below is indexed
+	// relative to that.
+	fields := strings.Fields(stat[lastParen+1:])
+	const (
+		idxUtime     = 11 // field 14
+		idxStime     = 12 // field 15
+		idxPriority  = 15 // field 18
+		idxNice      = 16 // field 19
+		idxStarttime = 19 // field 22
+	)
+	if len(fields) <= idxStarttime {
+		return
 	}
 
-	utime, _ := strconv.ParseInt(fields[13], 10, 64)
-	stime, _ := strconv.ParseInt(fields[14], 10, 64)
+	info.Priority, _ = strconv.Atoi(fields[idxPriority])
+	info.NiceValue, _ = strconv.Atoi(fields[idxNice])
+
+	utime, _ := strconv.ParseInt(fields[idxUtime], 10, 64)
+	stime, _ := strconv.ParseInt(fields[idxStime], 10, 64)
 	clockTicks := float64(utime + stime)
+	// ponytail: assumes USER_HZ (sysconf(_SC_CLK_TCK)) == 100, true on
+	// virtually all Linux builds; add a sysconf lookup if a target ever uses
+	// a different tick rate.
 	info.CPUTime = clockTicks / 100.0
 
-	starttime, _ := strconv.ParseInt(fields[21], 10, 64)
+	starttime, _ := strconv.ParseInt(fields[idxStarttime], 10, 64)
 	bootTime := getBootTime()
 	startTimeSec := bootTime + (starttime / 100)
 	startTimeObj := time.Unix(startTimeSec, 0)
