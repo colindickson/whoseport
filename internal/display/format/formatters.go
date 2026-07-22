@@ -6,6 +6,8 @@ import (
 
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
+
+	"github.com/bluehoodie/whoseport/internal/terminal"
 )
 
 // FormatBytes converts bytes to human-readable format
@@ -120,18 +122,29 @@ func GetStateEmoji(state string) string {
 	return "⚪"
 }
 
-// GetStateColor returns the color for a process state
+// GetStateColor returns the theme color for a process state.
+//
+// theme is accepted as interface{}, not terminal.Theme, purely so that
+// cmd/whoseport/main_test.go (owned by another agent) can keep passing nil
+// without a build break; there is no real circular-dependency constraint
+// (internal/terminal imports nothing). When theme is a terminal.Theme, its
+// State* fields are used; otherwise terminal.DefaultTheme() is used, which
+// is byte-identical to the old hard-coded colors.
+// ponytail: switch this to a plain terminal.Theme parameter once
+// main_test.go's nil call site is updated to pass a real theme.
 func GetStateColor(state string, theme interface{}) string {
-	// Accept theme as interface{} to avoid circular dependency
-	// Caller should pass theme colors directly
-	if strings.Contains(state, "Running") {
-		return "\033[32m" // Green
-	} else if strings.Contains(state, "Sleeping") {
-		return "\033[36m" // Cyan
-	} else if strings.Contains(state, "Zombie") {
-		return "\033[31m" // Red
-	} else if strings.Contains(state, "Stopped") {
-		return "\033[33m" // Yellow
+	th, ok := theme.(terminal.Theme)
+	if !ok {
+		th = terminal.DefaultTheme()
 	}
-	return "\033[37m" // White
+	if strings.Contains(state, "Running") {
+		return th.StateRunning
+	} else if strings.Contains(state, "Sleeping") {
+		return th.StateSleeping
+	} else if strings.Contains(state, "Zombie") {
+		return th.StateZombie
+	} else if strings.Contains(state, "Stopped") {
+		return th.StateStopped
+	}
+	return th.StateDefault
 }

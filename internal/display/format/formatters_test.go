@@ -1,6 +1,10 @@
 package format
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/bluehoodie/whoseport/internal/terminal"
+)
 
 func TestVisualWidth(t *testing.T) {
 	tests := []struct {
@@ -84,6 +88,56 @@ func TestStripAnsiCodes(t *testing.T) {
 			got := StripAnsiCodes(tt.input)
 			if got != tt.want {
 				t.Errorf("StripAnsiCodes(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetStateColor(t *testing.T) {
+	// nil falls back to terminal.DefaultTheme(), byte-identical to the
+	// old hard-coded colors.
+	nilCases := []struct {
+		state string
+		want  string
+	}{
+		{"Running", "\033[32m"},
+		{"Sleeping", "\033[36m"},
+		{"Zombie", "\033[31m"},
+		{"Stopped", "\033[33m"},
+		{"Unknown", "\033[37m"},
+	}
+	for _, tt := range nilCases {
+		t.Run("nil/"+tt.state, func(t *testing.T) {
+			got := GetStateColor(tt.state, nil)
+			if got != tt.want {
+				t.Errorf("GetStateColor(%q, nil) = %q, want %q", tt.state, got, tt.want)
+			}
+		})
+	}
+
+	// A real theme must actually be read, not ignored.
+	custom := terminal.Theme{
+		StateRunning:  "\033[95m",
+		StateSleeping: "\033[96m",
+		StateZombie:   "\033[97m",
+		StateStopped:  "\033[93m",
+		StateDefault:  "\033[90m",
+	}
+	themeCases := []struct {
+		state string
+		want  string
+	}{
+		{"Running", custom.StateRunning},
+		{"Sleeping", custom.StateSleeping},
+		{"Zombie", custom.StateZombie},
+		{"Stopped", custom.StateStopped},
+		{"Unknown", custom.StateDefault},
+	}
+	for _, tt := range themeCases {
+		t.Run("theme/"+tt.state, func(t *testing.T) {
+			got := GetStateColor(tt.state, custom)
+			if got != tt.want {
+				t.Errorf("GetStateColor(%q, custom) = %q, want %q", tt.state, got, tt.want)
 			}
 		})
 	}
