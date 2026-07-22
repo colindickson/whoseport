@@ -79,3 +79,34 @@ func TestParseLimitsMaxFDsUnlimited(t *testing.T) {
 		t.Errorf("MaxFDs = %d, want 0 (unset)", info.MaxFDs)
 	}
 }
+
+// TestParseLimitsMemoryLimitUnlimited verifies MemoryLimit is set to the
+// documented -1 sentinel when the relevant limits are all "unlimited".
+func TestParseLimitsMemoryLimitUnlimited(t *testing.T) {
+	limits := "Limit                     Soft Limit           Hard Limit           Units\n" +
+		"Max address space         unlimited            unlimited            bytes\n" +
+		"Max data size             unlimited            unlimited            bytes\n"
+
+	info := &model.ProcessInfo{}
+	parseLimits(limits, info)
+
+	if info.MemoryLimit != -1 {
+		t.Errorf("MemoryLimit = %d, want -1", info.MemoryLimit)
+	}
+}
+
+// TestParseLimitsMemoryLimitFinite verifies a real numeric limit is kept
+// (as the min of the two candidate lines) and does not get overridden by
+// the -1 "unlimited" sentinel.
+func TestParseLimitsMemoryLimitFinite(t *testing.T) {
+	limits := "Limit                     Soft Limit           Hard Limit           Units\n" +
+		"Max address space         unlimited            unlimited            bytes\n" +
+		"Max data size             1048576              2097152              bytes\n"
+
+	info := &model.ProcessInfo{}
+	parseLimits(limits, info)
+
+	if info.MemoryLimit != 1024 {
+		t.Errorf("MemoryLimit = %d, want 1024", info.MemoryLimit)
+	}
+}

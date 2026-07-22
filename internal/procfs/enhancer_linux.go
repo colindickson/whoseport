@@ -247,15 +247,27 @@ func parseIO(io string, info *model.ProcessInfo) {
 
 func parseLimits(limits string, info *model.ProcessInfo) {
 	lines := strings.Split(limits, "\n")
+
+	// sawMemoryLimit tracks whether a relevant limit line was found at all;
+	// haveFiniteMemoryLimit tracks whether any of those lines gave a real
+	// (non-unlimited) number. A -1 sentinel must not poison the running-min
+	// comparison, so it's tracked separately rather than compared directly.
+	sawMemoryLimit := false
+	haveFiniteMemoryLimit := false
+
 	for _, line := range lines {
 		if strings.Contains(line, "Max address space") || strings.Contains(line, "Max data size") {
 			fields := strings.Fields(line)
 			if len(fields) >= 4 {
+				sawMemoryLimit = true
 				limit := fields[3]
 				if limit != "unlimited" {
-					limitVal, _ := strconv.ParseInt(limit, 10, 64)
-					if info.MemoryLimit == 0 || limitVal < info.MemoryLimit {
-						info.MemoryLimit = limitVal / 1024
+					if limitVal, err := strconv.ParseInt(limit, 10, 64); err == nil {
+						limitVal /= 1024
+						if !haveFiniteMemoryLimit || limitVal < info.MemoryLimit {
+							info.MemoryLimit = limitVal
+							haveFiniteMemoryLimit = true
+						}
 					}
 				}
 			}
@@ -267,6 +279,10 @@ func parseLimits(limits string, info *model.ProcessInfo) {
 				info.MaxFDs, _ = strconv.Atoi(fields[3])
 			}
 		}
+	}
+
+	if sawMemoryLimit && !haveFiniteMemoryLimit {
+		info.MemoryLimit = -1
 	}
 }
 
