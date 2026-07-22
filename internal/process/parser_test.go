@@ -101,6 +101,46 @@ func TestLsofParser_Parse(t *testing.T) {
 			wantName: "*:8080 (LISTEN)",
 		},
 		{
+			// The 'a' field carries the fd's access mode (r/w/u); it must be
+			// appended to the fd value, matching the pre-rewrite "21u" shape.
+			name: "fd access mode appended",
+			input: "p623\n" +
+				"crapportd\n" +
+				"Lcolindickson\n" +
+				"f10\n" +
+				"au\n" +
+				"tIPv4\n" +
+				"PTCP\n" +
+				"n*:60970\n",
+			wantCmd:  "rapportd",
+			wantPID:  623,
+			wantUser: "colindickson",
+			wantFD:   "10u",
+			wantType: "IPv4",
+			wantNode: "TCP",
+			wantName: "*:60970 (LISTEN)",
+		},
+		{
+			// lsof emits a blank access mode (a single space) when the mode is
+			// unknown; that must not leave a trailing space on the fd value.
+			name: "fd with blank access mode",
+			input: "p623\n" +
+				"crapportd\n" +
+				"Lcolindickson\n" +
+				"f10\n" +
+				"a \n" +
+				"tIPv4\n" +
+				"PTCP\n" +
+				"n*:60970\n",
+			wantCmd:  "rapportd",
+			wantPID:  623,
+			wantUser: "colindickson",
+			wantFD:   "10",
+			wantType: "IPv4",
+			wantNode: "TCP",
+			wantName: "*:60970 (LISTEN)",
+		},
+		{
 			name:         "empty input",
 			input:        "",
 			wantErrAny:   true,

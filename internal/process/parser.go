@@ -23,23 +23,25 @@ func NewLsofParser() *LsofParser {
 
 // entry holds the fields lsof -F emits for a single listening file descriptor.
 type entry struct {
-	pid     int
-	command string
-	user    string
-	fd      string
-	typ     string
-	device  string
-	offset  string
-	proto   string
-	name    string
+	pid        int
+	command    string
+	user       string
+	fd         string
+	accessMode string
+	typ        string
+	device     string
+	offset     string
+	proto      string
+	name       string
 }
 
 // Parse parses lsof -F output (see `man lsof`, OUTPUT FOR OTHER PROGRAMS section) and
 // returns the first listening process found. lsof emits one field per line, each
 // prefixed by a single identifier character: `p` starts a new process record (pid),
 // `f` starts a new file record (fd) within the current process. All other identifiers
-// attach to whichever record is currently open. This caller requests the `p c L f t d
-// o P n` fields (pid, command, login name, fd, type, device, offset, protocol, name).
+// attach to whichever record is currently open. This caller requests the `p c L f a t
+// d o P n` fields (pid, command, login name, fd, access mode, type, device, offset,
+// protocol, name).
 func (p *LsofParser) Parse(output []byte) (*model.ProcessInfo, error) {
 	var entries []entry
 	var cur *entry
@@ -70,6 +72,10 @@ func (p *LsofParser) Parse(output []byte) (*model.ProcessInfo, error) {
 		case 'f':
 			entries = append(entries, entry{pid: pid, command: command, user: user, fd: val})
 			cur = &entries[len(entries)-1]
+		case 'a':
+			if cur != nil {
+				cur.accessMode = val
+			}
 		case 't':
 			if cur != nil {
 				cur.typ = val
@@ -101,6 +107,12 @@ func (p *LsofParser) Parse(output []byte) (*model.ProcessInfo, error) {
 	}
 
 	e := entries[0]
+	// lsof's 'a' field carries the access mode ('r'/'w'/'u', or a blank space when
+	// unknown); append it to the fd number so it matches lsof's own "10u" shape.
+	fd := e.fd
+	if e.accessMode != "" && e.accessMode != " " {
+		fd += e.accessMode
+	}
 	// ponytail: the executor only ever requests -sTCP:LISTEN rows, so every entry
 	// here is a listener; append the suffix the rest of the app (README, display
 	// layer, JSON consumers) already expects in the name field.
@@ -108,7 +120,7 @@ func (p *LsofParser) Parse(output []byte) (*model.ProcessInfo, error) {
 		e.command,
 		e.pid,
 		e.user,
-		e.fd,
+		fd,
 		e.typ,
 		e.device,
 		e.offset,

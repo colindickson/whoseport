@@ -18,7 +18,7 @@ func NewLsofExecutor() *LsofExecutor {
 // Execute runs lsof, filtered to listening TCP sockets on the specified port, and
 // returns its field-output (-F) mode output for the Parser to consume.
 func (e *LsofExecutor) Execute(port int) ([]byte, error) {
-	cmd := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "pcLftdoPn")
+	cmd := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "pcLfatdoPn")
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
