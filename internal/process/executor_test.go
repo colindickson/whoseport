@@ -48,6 +48,17 @@ func TestClassifyLsofResult(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// lsof exits non-zero for a warning even when it found the port's
+			// listener. Discarding those results reports a false negative on any
+			// host with an unstattable mount (gvfs, SMB), which is the worst
+			// possible answer: confidently wrong.
+			name:       "warning on stderr alongside results: results win",
+			stdout:     []byte("p123\ncpython3.11\n"),
+			stderr:     []byte("lsof: WARNING: can't stat() the smbfs file system /Volumes/x\n"),
+			err:        exitErr,
+			wantOutput: []byte("p123\ncpython3.11\n"),
+		},
+		{
 			name:    "non-error exec failure (e.g. lsof not on PATH)",
 			stdout:  nil,
 			stderr:  nil,

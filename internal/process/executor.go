@@ -18,7 +18,9 @@ func NewLsofExecutor() *LsofExecutor {
 // Execute runs lsof, filtered to listening TCP sockets on the specified port, and
 // returns its field-output (-F) mode output for the Parser to consume.
 func (e *LsofExecutor) Execute(port int) ([]byte, error) {
-	cmd := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "pcLfatdoPn")
+	// -w suppresses warnings about unstattable filesystems (gvfs, network mounts),
+	// which lsof emits on stderr while still exiting non-zero.
+	cmd := exec.Command("lsof", "-w", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-F", "pcLfatdoPn")
 
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
@@ -29,24 +31,29 @@ func (e *LsofExecutor) Execute(port int) ([]byte, error) {
 }
 
 // classifyLsofResult decides whether a completed lsof run found no match or hit a
-// real error. lsof exits non-zero both when nothing matches the selection criteria
-// and when something is actually wrong (bad flags, a broken wrapper on PATH, an
-// lsof build that rejects one of our options); the only way to tell those apart is
-// that a genuine problem produces output on stdout and/or stderr, while "no match"
-// produces neither. Treating every non-zero exit as "no match" would silently
-// report a false negative, which is worse than surfacing an error.
+// real error. lsof's exit status alone cannot tell those apart: it exits non-zero
+// when nothing matches, when something is genuinely wrong (bad flags, a broken
+// wrapper on PATH), and also when it merely emitted a warning while producing
+// complete, correct results. So results outrank the exit status, and an empty run
+// is distinguished by whether lsof explained itself on stderr.
 func classifyLsofResult(stdout, stderr []byte, err error) ([]byte, error) {
-	if err == nil {
+	// Finding something beats any exit status: lsof still reports results
+	// alongside warnings it exits non-zero for.
+	if len(stdout) > 0 {
 		return stdout, nil
 	}
-
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && len(stdout) == 0 && len(stderr) == 0 {
+	if err == nil {
 		return nil, nil
 	}
 
+	// No results. A genuine failure says why on stderr; a silent non-zero exit
+	// means nothing matched, which is not an error.
 	if len(stderr) > 0 {
 		return nil, fmt.Errorf("lsof failed: %s: %w", bytes.TrimSpace(stderr), err)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return nil, nil
 	}
 	return nil, fmt.Errorf("failed to run lsof: %w", err)
 }
