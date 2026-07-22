@@ -73,8 +73,9 @@ whoseport --no-interactive 8080
 ```
 
 **JSON Output** (for scripting)
+`--json` always implies `-n`, so the output is nothing but parseable JSON on stdout:
 ```bash
-whoseport --json 8080
+whoseport --json 8080 | jq .command
 ```
 
 ### Process Management
@@ -82,8 +83,7 @@ whoseport --json 8080
 **Kill with Interactive Prompt** (default behavior)
 ```bash
 whoseport 8080
-# Prompts: Kill process? (y/N)
-# Allows choosing signal: SIGTERM, SIGKILL, SIGINT, etc.
+# Prompts: Select action: [1] SIGTERM  [2] SIGKILL  [3] Cancel
 ```
 
 **Terminate Gracefully** (SIGTERM - allows cleanup)
@@ -118,52 +118,38 @@ whoseport --kill 8080
 ║                              🔍 PORT 8080 ANALYSIS                                     ║
 ╚════════════════════════════════════════════════════════════════════════════════════════╝
 
-  ┏━━━━━━━━━━━━━━━━━━━━━━━━┓
-  ┃ ⚙️  PROCESS IDENTITY   ┃
-  ┗━━━━━━━━━━━━━━━━━━━━━━━━┛
+  ▌ ⚙️  PROCESS IDENTITY
   Command:             node
   Full Command:        node server.js --port 8080
-  Process ID:          🔢 42573
+  Process ID:          42573
   Parent PID:          41234
   Parent Process:      bash
   User:                colin
   UID / GID:           501 / 20
   Child Processes:     3
 
-  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-  ┃ 📦 BINARY INFORMATION    ┃
-  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+  ▌ 📦 BINARY INFORMATION
   Executable Path:     /usr/local/bin/node
   Binary Size:         47.3 MB
   Environment Vars:    42
   Working Directory:   /home/colin/projects
 
-  ┏━━━━━━━━━━━━━━━━━━━┓
-  ┃ 📊 PROCESS STATE  ┃
-  ┗━━━━━━━━━━━━━━━━━━━┛
+  ▌ 📊 PROCESS STATE
   State:               🟢 S (Sleeping)
   Threads:             12
   Started:             2025-11-01 10:23:15
   Uptime:              ⏱ 2h 34m
   CPU Time:            45.23s (2.5%)
 
-  ┏━━━━━━━━━━━━━━━━━┓
-  ┃ 💾 MEMORY USAGE ┃
-  ┗━━━━━━━━━━━━━━━━━┛
+  ▌ 💾 MEMORY USAGE
   Resident Set (RSS):  124.5 MB
-  [██████████████████████████████░░]
   Virtual Memory:      2.3 GB
-  [███████████████░░░░░░░░░░░░░░░░░]
 
-  ┏━━━━━━━━━━━━━━━━━━━┓
-  ┃ 📁 FILE DESCRIPTORS┃
-  ┗━━━━━━━━━━━━━━━━━━━┛
+  ▌ 📁 FILE DESCRIPTORS
   Open FDs:            23 / 1024 (2.2%)
   [██░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
 
-  ┏━━━━━━━━━━━━━┓
-  ┃ 🌐 NETWORK  ┃
-  ┗━━━━━━━━━━━━━┛
+  ▌ 🌐 NETWORK
   Protocol:            IPV4
   Listening On:        🎧 *:8080 (LISTEN)
   Node Type:           TCP
@@ -172,6 +158,8 @@ whoseport --kill 8080
     ┃ 192.168.1.100:45678 → 192.168.1.50:8080 ESTABLISHED
     ┃ 192.168.1.101:45679 → 192.168.1.50:8080 ESTABLISHED
 ```
+
+The UI adapts to your terminal width (capped at 90 columns, floored at 40) instead of a fixed layout.
 
 ### JSON Mode
 
@@ -223,11 +211,10 @@ When **whoseport** detects that a port is being used by a Docker container, it a
 
 ### Docker Detection
 
-The tool automatically detects Docker containers in three ways:
+The tool automatically detects Docker containers in two ways:
 
 1. **docker-proxy processes** - Detects port forwarding proxies created by Docker
 2. **Container cgroup** - Checks if a process is running inside a container via `/proc/{pid}/cgroup`
-3. **Container environment** - Examines process environment variables for Docker indicators
 
 ### Docker Display Mode
 
@@ -304,15 +291,19 @@ Choice [4]:
 
 **Direct Actions**
 
-- **Stop container** (equivalent to `-t` flag)
-  ```bash
-  whoseport -t 8080  # Stops the Docker container gracefully
-  ```
+On a Docker-backed port, both `-t` and `-k` just stop the container (`docker stop`) without
+prompting; neither one removes it. Removing a container is only ever done as an explicit
+choice ([2] or [3]) in the interactive menu above - it's never a silent default.
 
-- **Stop and remove container** (equivalent to `-k` flag)
-  ```bash
-  whoseport -k 8080  # Stops and removes the Docker container
-  ```
+```bash
+whoseport -t 8080  # Stops the Docker container gracefully
+whoseport -k 8080  # Also just stops the container - does not remove it
+```
+
+**JSON Output** on a Docker-backed port emits the container's JSON (not the process JSON):
+```bash
+whoseport --json 8080 | jq .name
+```
 
 ### Docker Prerequisites
 
@@ -348,6 +339,9 @@ Interface-driven design enables easy testing and extension.
 - Command name, PID, User, File Descriptor
 - Protocol type (TCP/UDP), Network type (IPv4/IPv6)
 - Port and listening address
+
+If a process listens on the same port over both IPv4 and IPv6 (a common pattern), whoseport
+reports the first listener it finds rather than corrupting the output.
 
 ### Enhanced (from `/proc` on Linux)
 - **Process Details**: Full command line, parent process, state, threads
@@ -410,11 +404,12 @@ GOOS=darwin GOARCH=arm64 go build -o whoseport-darwin-arm64 ./cmd/whoseport
 ### CI/CD
 
 GitHub Actions workflow includes:
-- **Testing** on Ubuntu and macOS with Go 1.23 and 1.24
+- **Testing** on Ubuntu and macOS with Go 1.24
 - **Race detection** for concurrency issues
 - **Test coverage** reporting
-- **Cross-compilation** for multiple platforms
-- **Linting** with `go vet`, `go fmt`, and `staticcheck`
+- **Cross-compilation** for multiple platforms, building both the Linux- and Darwin-tagged
+  source on every run regardless of which OS the job happens to run on
+- **Linting** with `go vet` (native and Darwin-targeted), `go fmt`, and `staticcheck`
 - **Security scanning** with `govulncheck`
 
 ## Code Style
