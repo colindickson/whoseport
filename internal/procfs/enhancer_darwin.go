@@ -236,7 +236,7 @@ func parseCPUTime(timeStr string) float64 {
 func parseElapsedTime(etime string) string {
 	// Format: [[DD-]HH:]MM:SS
 	duration := parseElapsedDuration(etime)
-	return FormatDuration(duration)
+	return format.FormatDuration(duration)
 }
 
 func parseElapsedDuration(etime string) time.Duration {
@@ -362,14 +362,4 @@ func ExpandState(state string) string {
 		return expanded
 	}
 	return state
-}
-
-// FormatDuration formats a duration to human-readable string.
-//
-// ponytail: this is a thin delegate to format.FormatDuration, kept exported
-// here (and duplicated in enhancer_linux.go) only because
-// cmd/whoseport/main_test.go still calls procfs.FormatDuration directly.
-// Once that test is repointed at format.FormatDuration, delete both wrappers.
-func FormatDuration(d time.Duration) string {
-	return format.FormatDuration(d)
 }

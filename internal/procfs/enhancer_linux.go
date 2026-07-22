@@ -194,7 +194,7 @@ func parseStat(stat string, info *model.ProcessInfo, root string) {
 	info.StartTime = startTimeObj.Format("2006-01-02 15:04:05")
 
 	uptime := time.Since(startTimeObj)
-	info.Uptime = FormatDuration(uptime)
+	info.Uptime = format.FormatDuration(uptime)
 
 	if uptime.Seconds() > 0 {
 		info.CPUPercent = (info.CPUTime / uptime.Seconds()) * 100.0
@@ -431,16 +431,6 @@ func ExpandState(state string) string {
 		return expanded
 	}
 	return state
-}
-
-// FormatDuration formats a duration to human-readable string.
-//
-// ponytail: this is a thin delegate to format.FormatDuration, kept exported
-// here (and duplicated in enhancer_darwin.go) only because
-// cmd/whoseport/main_test.go still calls procfs.FormatDuration directly.
-// Once that test is repointed at format.FormatDuration, delete both wrappers.
-func FormatDuration(d time.Duration) string {
-	return format.FormatDuration(d)
 }
 
 // ParseAddress parses hex address to IP:port format.
