@@ -149,4 +149,3 @@ func TestPromptKillActionEOF(t *testing.T) {
 		t.Error("PromptKillAction() should return false on EOF")
 	}
 }
-
