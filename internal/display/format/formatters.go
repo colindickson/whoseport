@@ -80,9 +80,13 @@ func VisualWidth(s string) int {
 	return width
 }
 
-// StripAnsiCodes removes ANSI escape sequences from a string
+// StripAnsiCodes removes ANSI escape sequences from a string.
+// ponytail: only recognizes ESC...m (SGR color codes), which is all this
+// repo ever emits; other escape sequences (cursor moves, etc.) would not
+// be stripped correctly. Upgrade to a full CSI-aware parser if that changes.
 func StripAnsiCodes(s string) string {
-	result := ""
+	var b strings.Builder
+	b.Grow(len(s))
 	inEscape := false
 	for _, c := range s {
 		if c == '\033' {
@@ -95,9 +99,9 @@ func StripAnsiCodes(s string) string {
 			}
 			continue
 		}
-		result += string(c)
+		b.WriteRune(c)
 	}
-	return result
+	return b.String()
 }
 
 // GetStateEmoji returns an emoji representing the process state

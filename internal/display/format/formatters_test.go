@@ -64,6 +64,31 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+func TestStripAnsiCodes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"no codes", "hello", "hello"},
+		{"simple color", "\033[31mred\033[0m", "red"},
+		{"multiple codes", "\033[1m\033[31mbold red\033[0m", "bold red"},
+		{"256 color", "\033[38;5;208morange\033[0m", "orange"},
+		{"mixed", "Hello \033[31mRed\033[0m World", "Hello Red World"},
+		{"empty", "", ""},
+		{"only codes", "\033[31m\033[0m", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripAnsiCodes(tt.input)
+			if got != tt.want {
+				t.Errorf("StripAnsiCodes(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func isValidUTF8(s string) bool {
 	for _, r := range s {
 		if r == '�' {
