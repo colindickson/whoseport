@@ -32,12 +32,36 @@ func FormatMemory(kb int64) string {
 	}
 }
 
-// Truncate shortens a string to maxLen with ellipsis
+// Truncate shortens s to fit within maxLen display columns (not bytes or
+// runes), appending "..." when truncation occurs. It is grapheme-aware, so
+// multi-byte/emoji input is never split mid-rune. It never panics: maxLen
+// <= 0 returns "", and 0 < maxLen <= 3 returns that many "." characters
+// instead of a truncated fragment plus ellipsis.
 func Truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	if VisualWidth(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	if maxLen <= 3 {
+		return strings.Repeat(".", maxLen)
+	}
+
+	target := maxLen - 3
+	var b strings.Builder
+	width := 0
+	graphemes := uniseg.NewGraphemes(s)
+	for graphemes.Next() {
+		cluster := graphemes.Str()
+		clusterWidth := runewidth.StringWidth(cluster)
+		if width+clusterWidth > target {
+			break
+		}
+		b.WriteString(cluster)
+		width += clusterWidth
+	}
+	return b.String() + "..."
 }
 
 // VisualWidth calculates the visual width of a string accounting for emojis
