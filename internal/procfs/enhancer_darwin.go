@@ -93,7 +93,7 @@ func (e *ProcessEnhancer) Enhance(info *model.ProcessInfo) error {
 	// Count open file descriptors using lsof
 	cmd = exec.Command("lsof", "-p", strconv.Itoa(pid))
 	if output, err := cmd.Output(); err == nil {
-		lines := strings.Split(string(output), "\n")
+		lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
 		// Subtract 1 for header line
 		if len(lines) > 1 {
 			info.OpenFDs = len(lines) - 1
@@ -220,7 +220,7 @@ func parsePsOutput(output string, info *model.ProcessInfo) {
 	pid := info.ID
 	cmd := exec.Command("ps", "-M", "-p", strconv.Itoa(pid))
 	if output, err := cmd.Output(); err == nil {
-		lines := strings.Split(string(output), "\n")
+		lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
 		// Count lines minus header
 		if len(lines) > 1 {
 			info.Threads = len(lines) - 1
