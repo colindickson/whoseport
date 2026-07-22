@@ -135,6 +135,11 @@ jobs:
         fi
         echo "Build tags verified successfully"
 
+    - name: Build all packages for Linux and Darwin
+      run: |
+        GOOS=linux go build ./...
+        GOOS=darwin go build ./...
+
     - name: Upload cross-compiled artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -159,6 +164,9 @@ jobs:
 
     - name: Run go vet
       run: go vet ./...
+
+    - name: Run go vet for Darwin
+      run: GOOS=darwin go vet ./...
 
     - name: Run go fmt check
       run: |
